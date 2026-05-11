@@ -1,11 +1,18 @@
 package com.vvad.vp.ui.screens
 
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -15,25 +22,43 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import com.vvad.vp.data.AlbumOfflineAvailability
 import com.vvad.vp.data.NavidromeManager
+import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.ui.models.AlbumDetails
 import com.vvad.vp.ui.models.Track
+import kotlinx.coroutines.launch
 
 @Composable
 fun AlbumScreen(
     albumId: String?,
     navidromeManager: NavidromeManager,
+    offlineLibraryManager: OfflineLibraryManager,
     onBack: () -> Unit,
     onArtistClick: (String) -> Unit,
-    onTrackClick: (Track, String, String) -> Unit
+    onTrackClick: (Track, String, String, String) -> Unit
 ) {
     var album by remember { mutableStateOf<AlbumDetails?>(null) }
+    var isDownloadedOffline by remember(albumId) { mutableStateOf(false) }
+    var offlineAvailability by remember(albumId) { mutableStateOf<AlbumOfflineAvailability?>(null) }
+    var cachedTrackIds by remember(albumId) { mutableStateOf<Set<String>>(emptySet()) }
+    var isOfflineMode by remember(albumId) { mutableStateOf(false) }
+    var isDownloading by remember(albumId) { mutableStateOf(false) }
+    var downloadMessage by remember(albumId) { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val isNetworkAvailable by rememberNetworkAvailability()
 
-    LaunchedEffect(albumId) {
+    LaunchedEffect(albumId, isNetworkAvailable) {
         if (albumId != null) {
-            album = navidromeManager.fetchAlbum(albumId)
+            val result = navidromeManager.fetchAlbumWithSource(albumId)
+            album = result.album
+            isDownloadedOffline = offlineLibraryManager.isAlbumDownloaded(albumId)
+            offlineAvailability = offlineLibraryManager.getAlbumAvailability(albumId)
+            cachedTrackIds = offlineLibraryManager.getCachedTrackIds(albumId)
+            isOfflineMode = !isNetworkAvailable || result.fromOfflineCache
         }
     }
 
@@ -73,8 +98,66 @@ fun AlbumScreen(
 
                         Text(details.name, style = MaterialTheme.typography.headlineMedium, color = Color.White)
                         Text(details.artist, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(0.7f))
-                        if (details.year != 0) {
-                            Text("${details.year}", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.5f))
+                        details.year?.takeIf { it != 0 }?.let { year ->
+                            Text("$year", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.5f))
+                        }
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        FilledTonalButton(
+                            onClick = {
+                                if (isDownloading) return@FilledTonalButton
+                                scope.launch {
+                                    isDownloading = true
+                                    downloadMessage = null
+                                    runCatching {
+                                        offlineLibraryManager.downloadAlbumForOffline(details, navidromeManager)
+                                    }.onSuccess { result ->
+                                        isDownloadedOffline = result.downloadedTracks == result.totalTracks
+                                        downloadMessage = "Saved ${result.downloadedTracks}/${result.totalTracks} tracks offline"
+                                        album = result.album
+                                        offlineAvailability = offlineLibraryManager.getAlbumAvailability(result.album.id)
+                                        cachedTrackIds = offlineLibraryManager.getCachedTrackIds(result.album.id)
+                                        isOfflineMode = false
+                                    }.onFailure {
+                                        downloadMessage = it.localizedMessage ?: "Offline download failed"
+                                    }
+                                    isDownloading = false
+                                }
+                            }
+                        ) {
+                            if (isDownloading) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(18.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = if (isDownloadedOffline) Icons.Default.DownloadDone else Icons.Default.Download,
+                                    contentDescription = null
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(if (isDownloadedOffline) "Available Offline" else "Download Offline")
+                        }
+
+                        downloadMessage?.let { message ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.75f)
+                            )
+                        } ?: offlineAvailability?.takeIf { it.cachedTrackCount > 0 }?.let { availability ->
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = if (availability.downloadedForOffline) {
+                                    "All ${availability.totalTrackCount} tracks are available offline"
+                                } else {
+                                    "${availability.cachedTrackCount}/${availability.totalTrackCount} tracks are currently cached offline"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(alpha = 0.75f)
+                            )
                         }
                         Spacer(modifier = Modifier.height(24.dp))
                     }
@@ -93,11 +176,18 @@ fun AlbumScreen(
                             }
                         }
                         items(tracks) { track ->
+                            val isTrackAvailableOffline = cachedTrackIds.contains(track.id)
+                            val isTrackEnabled = !isOfflineMode || isTrackAvailableOffline
                             TrackItem(
                                 track = track,
+                                enabled = isTrackEnabled,
                                 onArtistClick = onArtistClick,
-                                modifier = Modifier.clickable {
-                                    onTrackClick(track, details.name, details.coverArtUrl)
+                                modifier = if (isTrackEnabled) {
+                                    Modifier.clickable {
+                                        onTrackClick(track, details.id, details.name, details.coverArtUrl)
+                                    }
+                                } else {
+                                    Modifier
                                 }
                             )
                         }
@@ -125,24 +215,29 @@ fun AlbumScreen(
 @Composable
 fun TrackItem(
     track: Track,
+    enabled: Boolean,
     onArtistClick: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val titleColor = if (enabled) Color.White else Color.White.copy(alpha = 0.35f)
+    val secondaryColor = if (enabled) Color.White.copy(0.7f) else Color.White.copy(alpha = 0.3f)
+    val trailingColor = if (enabled) Color.White.copy(0.5f) else Color.White.copy(alpha = 0.25f)
+
     ListItem(
         modifier = modifier,
         colors = ListItemDefaults.colors(containerColor = Color.Transparent),
-        headlineContent = { Text(track.title, color = Color.White) },
+        headlineContent = { Text(track.title, color = titleColor) },
         supportingContent = {
             Row(modifier = Modifier.fillMaxWidth()) {
                 track.artists.forEachIndexed { index, artist ->
                     Text(
                         text = artist.name,
-                        color = Color.White.copy(0.7f),
+                        color = secondaryColor,
                         style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier.clickable { onArtistClick(artist.id) }
+                        modifier = Modifier
                     )
                     if (index < track.artists.size - 1) {
-                        Text(", ", color = Color.White.copy(0.7f), style = MaterialTheme.typography.bodySmall)
+                        Text(", ", color = secondaryColor, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
@@ -151,14 +246,62 @@ fun TrackItem(
             Text(
                 text = track.number.toString(),
                 modifier = Modifier.width(24.dp),
-                color = Color.White.copy(0.5f),
+                color = trailingColor,
                 style = MaterialTheme.typography.bodyMedium
             )
         },
         trailingContent = {
             val mins = track.duration / 60
             val secs = track.duration % 60
-            Text("%d:%02d".format(mins, secs), color = Color.White.copy(0.5f))
+            Text("%d:%02d".format(mins, secs), color = trailingColor)
         }
     )
+}
+
+@Composable
+private fun rememberNetworkAvailability(): State<Boolean> {
+    val context = LocalContext.current
+    val isAvailable = remember { mutableStateOf(context.isNetworkAvailable()) }
+
+    DisposableEffect(context) {
+        val connectivityManager =
+            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                isAvailable.value = context.isNetworkAvailable()
+            }
+
+            override fun onLost(network: Network) {
+                isAvailable.value = context.isNetworkAvailable()
+            }
+
+            override fun onCapabilitiesChanged(
+                network: Network,
+                networkCapabilities: NetworkCapabilities
+            ) {
+                isAvailable.value =
+                    networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+        }
+
+        val request = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+
+        connectivityManager.registerNetworkCallback(request, callback)
+        onDispose {
+            runCatching { connectivityManager.unregisterNetworkCallback(callback) }
+        }
+    }
+
+    return isAvailable
+}
+
+private fun Context.isNetworkAvailable(): Boolean {
+    val connectivityManager =
+        getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val network = connectivityManager.activeNetwork ?: return false
+    val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+    return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }

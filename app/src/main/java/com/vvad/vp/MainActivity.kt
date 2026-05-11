@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.media3.common.util.UnstableApi
 import com.vvad.vp.data.NavidromeManager
+import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.data.PlaybackManager
 import com.vvad.vp.ui.screens.AlbumScreen
 import com.vvad.vp.ui.screens.ArtistScreen
@@ -42,7 +43,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         val credentialsManager = CredentialsManager(this)
-        val navidromeManager = NavidromeManager(credentialsManager)
+        val offlineLibraryManager = OfflineLibraryManager(this)
+        val navidromeManager = NavidromeManager(credentialsManager, offlineLibraryManager)
         playbackManager = PlaybackManager(this, navidromeManager)
 
         setContent {
@@ -103,6 +105,7 @@ class MainActivity : ComponentActivity() {
                                 composable("home") {
                                     HomeScreen(
                                         navidromeManager = navidromeManager,
+                                        offlineLibraryManager = offlineLibraryManager,
                                         onAlbumClick = { albumId ->
                                             navController.navigate("album/$albumId")
                                         },
@@ -122,10 +125,11 @@ class MainActivity : ComponentActivity() {
                                     AlbumScreen(
                                         albumId = albumId,
                                         navidromeManager = navidromeManager,
+                                        offlineLibraryManager = offlineLibraryManager,
                                         onBack = { navController.popBackStack() },
                                         onArtistClick = { id -> navController.navigate("artist/$id") },
-                                        onTrackClick = { track, albumName, coverUrl ->
-                                            playbackManager.play(track, albumName, coverUrl)
+                                        onTrackClick = { track, albumId, albumName, coverUrl ->
+                                            playbackManager.play(track, albumId, albumName, coverUrl)
                                         }
                                     )
                                 }
@@ -144,6 +148,14 @@ class MainActivity : ComponentActivity() {
                     ) {
                         PlayerScreen(
                             playbackManager = playbackManager,
+                            onAlbumClick = { albumId ->
+                                isPlayerVisible = false
+                                navController.navigate("album/$albumId")
+                            },
+                            onArtistClick = { artistId ->
+                                isPlayerVisible = false
+                                navController.navigate("artist/$artistId")
+                            },
                             onClose = { isPlayerVisible = false }
                         )
                     }

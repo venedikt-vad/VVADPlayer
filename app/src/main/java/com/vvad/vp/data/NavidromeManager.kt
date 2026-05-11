@@ -10,7 +10,15 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 
-class NavidromeManager(val credentialsManager: CredentialsManager) {
+class NavidromeManager(
+    val credentialsManager: CredentialsManager,
+    private val offlineLibraryManager: OfflineLibraryManager? = null
+) {
+    data class AlbumFetchResult(
+        val album: AlbumDetails?,
+        val fromOfflineCache: Boolean
+    )
+
 
     companion object {
         const val API_VERSION = "1.16.1"
@@ -92,7 +100,9 @@ class NavidromeManager(val credentialsManager: CredentialsManager) {
         return@withContext albums
     }
 
-    suspend fun fetchAlbum(albumId: String): AlbumDetails? = withContext(Dispatchers.IO) {
+    suspend fun fetchAlbum(albumId: String): AlbumDetails? = fetchAlbumWithSource(albumId).album
+
+    suspend fun fetchAlbumWithSource(albumId: String): AlbumFetchResult = withContext(Dispatchers.IO) {
         val baseUrl = credentialsManager.getFullServerUrl()
         val user = credentialsManager.getUsername()
         val pass = credentialsManager.getPassword()
@@ -139,43 +149,49 @@ class NavidromeManager(val credentialsManager: CredentialsManager) {
                     }
                 }
 
-                return@withContext AlbumDetails(
+                val fetchedAlbum = AlbumDetails(
                     id = albumJson.getString("id"),
                     name = albumJson.getString("name"),
                     artist = albumJson.optString("artist", "Unknown"),
+                    artistId = albumJson.optString("artistId", ""),
                     year = albumJson.optInt("year"),
                     coverArtUrl = "$baseUrl/rest/getCoverArt?$auth&id=$albumId&size=600",
                     tracks = tracks.sortedWith(compareBy({ it.discNumber }, { it.number }))
                 )
+                return@withContext AlbumFetchResult(
+                    album = offlineLibraryManager?.cacheAlbum(fetchedAlbum) ?: fetchedAlbum,
+                    fromOfflineCache = false
+                )
             }
-        } catch (e: Exception) { e.printStackTrace() }
-        return@withContext null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        return@withContext AlbumFetchResult(
+            album = offlineLibraryManager?.getCachedAlbum(albumId),
+            fromOfflineCache = true
+        )
     }
 
-    // NavidromeManager.kt
     suspend fun getStreamUrl(trackId: String): String {
         val baseUrl = credentialsManager.getFullServerUrl()
         val user = credentialsManager.getUsername()
         val pass = credentialsManager.getPassword()
 
-        // Fetch saved transcoding preferences
         val format = credentialsManager.getPreferredFormat()
         val bitrate = credentialsManager.getMaxBitrate()
-
         val salt = generateSalt()
         val token = md5(pass + salt)
+        val auth = "u=$user&t=$token&s=$salt&$API_PARAMS&id=$trackId"
 
-        var url = "$baseUrl/rest/stream?u=$user&t=$token&s=$salt&$API_PARAMS&id=$trackId"
-
-        // Only append if not "raw" (original file)
-        if (format != "raw") {
-            url += "&format=$format"
+        if (format == "raw") {
+            // Use the original file endpoint directly so "RAW" never silently triggers transcoding.
+            return "$baseUrl/rest/download?$auth"
         }
-        // Only append if bitrate is greater than 0
+
+        var url = "$baseUrl/rest/stream?$auth&format=$format"
         if (bitrate > 0) {
             url += "&maxBitRate=$bitrate"
         }
-
         return url
     }
 

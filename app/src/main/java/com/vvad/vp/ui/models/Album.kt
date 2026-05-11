@@ -12,6 +12,7 @@ data class AlbumDetails(
     val id: String,
     val name: String,
     val artist: String,
+    val artistId: String,
     val year: Int?,
     val coverArtUrl: String,
     val tracks: List<Track>

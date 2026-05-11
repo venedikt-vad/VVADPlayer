@@ -97,7 +97,10 @@ fun SettingsScreen(credentialsManager: CredentialsManager,
                 FilterChip(
                     selected = savedFormat == format,
                     onClick = {
-                        scope.launch { credentialsManager.saveTranscodingSettings(format, savedBitrate) }
+                        scope.launch {
+                            val normalizedBitrate = if (format == "raw") 0 else savedBitrate
+                            credentialsManager.saveTranscodingSettings(format, normalizedBitrate)
+                        }
                     },
                     label = { Text(format.uppercase()) }
                 )
@@ -108,11 +111,19 @@ fun SettingsScreen(credentialsManager: CredentialsManager,
 
         // Bitrate Selection
         Text("Max Bitrate (kbps)", style = MaterialTheme.typography.labelMedium)
+        if (savedFormat == "raw") {
+            Text(
+                text = "RAW playback uses the original file and ignores bitrate limits.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
             bitrates.forEach { br ->
                 FilterChip(
-                    selected = savedBitrate == br,
+                    selected = if (savedFormat == "raw") br == 0 else savedBitrate == br,
                     onClick = {
+                        if (savedFormat == "raw" && br != 0) return@FilterChip
                         scope.launch { credentialsManager.saveTranscodingSettings(savedFormat, br) }
                     },
                     label = { Text(if (br == 0) "Unlimited" else br.toString()) }
