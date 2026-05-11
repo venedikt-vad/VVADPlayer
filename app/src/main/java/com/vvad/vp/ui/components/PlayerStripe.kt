@@ -1,6 +1,7 @@
 package com.vvad.vp.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -14,36 +15,41 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import com.vvad.vp.data.PlaybackManager
+import androidx.compose.material.icons.filled.Pause
+
 
 @Composable
-fun PlayerStripe() {
-    var offsetX by remember { mutableStateOf(0f) }
+fun PlayerStripe(playbackManager: PlaybackManager, onStripeClick: () -> Unit) {
+    val track = playbackManager.currentTrack ?: return // Don't show if nothing is playing
 
     Surface(
         tonalElevation = 8.dp,
-        modifier = Modifier.fillMaxWidth().pointerInput(Unit) {
-            detectHorizontalDragGestures(
-                onDragEnd = {
-                    if (offsetX > 100) onPreviousTrack() else if (offsetX < -100) onNextTrack()
-                    offsetX = 0f
-                },
-                onHorizontalDrag = { change, dragAmount ->
-                    change.consume()
-                    offsetX += dragAmount
-                }
-            )
-        }
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onStripeClick() }
     ) {
-        Row(modifier = Modifier.padding(8.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(48.dp).clip(MaterialTheme.shapes.small).background(Color.Gray), contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.AddCircle, contentDescription = null, tint = Color.White)
+        Row(
+            modifier = Modifier.padding(8.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            AsyncImage(
+                model = playbackManager.currentCoverArtUrl,
+                contentDescription = null,
+                modifier = Modifier.size(48.dp).clip(MaterialTheme.shapes.small)
+            )
+
+            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(track.title, style = MaterialTheme.typography.bodyMedium, maxLines = 1)
+                Text(playbackManager.currentAlbumName, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
             }
-            Column(modifier = Modifier.padding(start = 12.dp).weight(1f)) {
-                Text("Song Title", style = MaterialTheme.typography.bodyLarge)
-                Text("Artist Name", style = MaterialTheme.typography.bodyMedium)
-            }
-            IconButton(onClick = { /* Play/Pause */ }) {
-                Icon(Icons.Default.PlayArrow, contentDescription = "Play", modifier = Modifier.size(32.dp))
+
+            IconButton(onClick = { playbackManager.togglePlayPause() }) {
+                Icon(
+                    imageVector = if (playbackManager.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = "Play/Pause"
+                )
             }
         }
     }
