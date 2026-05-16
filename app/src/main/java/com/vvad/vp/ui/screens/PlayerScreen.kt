@@ -146,7 +146,8 @@ fun PlayerScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center // Centered song name
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),

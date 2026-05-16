@@ -66,7 +66,7 @@ fun HomeScreen(
             offlineAlbums = offlineLibraryManager.getOfflineAlbums()
 
             if (isNetworkAvailable) {
-                val fetchedAlbums = navidromeManager.fetchRandomAlbums(limit = 10)
+                val fetchedAlbums = navidromeManager.getRandomAlbums(limit = 10)
                 if (fetchedAlbums.isNotEmpty()) {
                     randomAlbums = fetchedAlbums
                     homeMode = HomeMode.Online

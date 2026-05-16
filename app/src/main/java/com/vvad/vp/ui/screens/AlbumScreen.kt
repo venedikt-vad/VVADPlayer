@@ -53,7 +53,7 @@ fun AlbumScreen(
 
     LaunchedEffect(albumId, isNetworkAvailable) {
         if (albumId != null) {
-            val result = navidromeManager.fetchAlbumWithSource(albumId)
+            val result = navidromeManager.getAlbum(albumId)
             album = result.album
             isDownloadedOffline = offlineLibraryManager.isAlbumDownloaded(albumId)
             offlineAvailability = offlineLibraryManager.getAlbumAvailability(albumId)
@@ -88,7 +88,6 @@ fun AlbumScreen(
                     modifier = Modifier.padding(padding).fillMaxSize(),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Full-width Logo/Cover
                     item {
                         AsyncImage(
                             model = details.coverArtUrl,
@@ -96,10 +95,45 @@ fun AlbumScreen(
                             modifier = Modifier.fillMaxWidth().aspectRatio(1f).padding(24.dp)
                         )
 
-                        Text(details.name, style = MaterialTheme.typography.headlineMedium, color = Color.White)
-                        Text(details.artist, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(0.7f))
+                        Text(
+                            text = details.name,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = Color.White
+                        )
+
+                        Row(
+                            modifier = Modifier
+                                .padding(vertical = 6.dp)
+                                .fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            details.artists.forEachIndexed { index, artist ->
+                                Text(
+                                    text = artist.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color.White.copy(0.8f),
+                                    modifier = Modifier
+                                        .clickable(enabled = artist.id.isNotBlank()) {
+                                            onArtistClick(artist.id)
+                                        }
+                                )
+                                if (index < details.artists.size - 1) {
+                                    Text(
+                                        text = " • ",
+                                        color = Color.White.copy(0.5f),
+                                        style = MaterialTheme.typography.titleMedium
+                                    )
+                                }
+                            }
+                        }
+
                         details.year?.takeIf { it != 0 }?.let { year ->
-                            Text("$year", style = MaterialTheme.typography.bodySmall, color = Color.White.copy(0.5f))
+                            Text(
+                                "$year",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.White.copy(0.5f)
+                            )
                         }
                         Spacer(modifier = Modifier.height(12.dp))
 

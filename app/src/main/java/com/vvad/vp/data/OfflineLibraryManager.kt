@@ -130,6 +130,7 @@ class OfflineLibraryManager(context: Context) {
         return runCatching {
             val json = JSONObject(file.readText())
             val tracks = json.optJSONArray("tracks")?.toTracks().orEmpty()
+
             val details = AlbumDetails(
                 id = json.getString("id"),
                 name = json.getString("name"),
@@ -137,8 +138,9 @@ class OfflineLibraryManager(context: Context) {
                 artistId = json.optString("artistId", ""),
                 year = if (json.has("year") && !json.isNull("year")) json.optInt("year") else null,
                 coverArtUrl = json.optString("coverArtUrl", ""),
-                tracks = tracks
+                tracks = tracks.toMutableList()   // ← FIXED: Convert to MutableList
             )
+
             CachedAlbumRecord(
                 details = details,
                 downloadedForOffline = json.optBoolean("downloadedForOffline", false)

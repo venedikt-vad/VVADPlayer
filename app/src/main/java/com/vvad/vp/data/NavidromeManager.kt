@@ -1,14 +1,18 @@
 package com.vvad.vp.data
 
+import android.util.Log
 import com.vvad.vp.ui.models.Album
 import com.vvad.vp.ui.models.AlbumDetails
+import com.vvad.vp.ui.models.ArtistDetails
 import com.vvad.vp.ui.models.Track
 import com.vvad.vp.ui.models.TrackArtist
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 
 class NavidromeManager(
     val credentialsManager: CredentialsManager,
@@ -19,183 +23,547 @@ class NavidromeManager(
         val fromOfflineCache: Boolean
     )
 
-
     companion object {
+        private const val TAG = "NavidromeManager"
         const val API_VERSION = "1.16.1"
         const val CLIENT_NAME = "VVADPlayer"
-        // Base parameters used in every request
+        // Base parameters used in Subsonic fallback requests (Streaming & Images)
         const val API_PARAMS = "v=$API_VERSION&c=$CLIENT_NAME"
     }
 
+    // Native API auth tokens
+    private var nativeToken: String? = null
+    private var nativeClientId: String = UUID.randomUUID().toString()
+
+    // =========================================================================
+    // PUBLIC API ENDPOINTS
+    // =========================================================================
+
+    /**
+     * Pings the server using the Subsonic compatibility endpoint to test configuration.
+     */
     suspend fun testConnection(server: String, user: String, pass: String, https: Boolean): Boolean = withContext(Dispatchers.IO) {
-        val protocol = if (https) "https://" else "http://"
-        val baseUrl = if (server.startsWith("http")) server else "$protocol$server"
-        val salt = generateSalt()
-        val token = md5(pass + salt)
+        try {
+            val protocol = if (https) "https://" else "http://"
+            val baseUrl = if (server.startsWith("http")) server else "$protocol$server"
+            val authParams = buildSubsonicAuthParams(user, pass)
 
-        val pingUrl = "$baseUrl/rest/ping?u=$user&t=$token&s=$salt&$API_PARAMS&f=json"
-
-        return@withContext try {
-            val connection = URL(pingUrl).openConnection() as HttpURLConnection
-            connection.connectTimeout = 5000
-            val responseCode = connection.responseCode
-
-            if (responseCode == HttpURLConnection.HTTP_OK) {
-                val response = connection.inputStream.bufferedReader().readText()
-                val json = JSONObject(response).getJSONObject("subsonic-response")
-                if (json.getString("status") == "ok") {
-                    // Success! Save everything
-                    credentialsManager.saveCredentials(server, user, pass, https)
-                    credentialsManager.updateStatus("Connected")
-                    true
-                } else {
-                    credentialsManager.updateStatus("Error: ${json.optJSONObject("error")?.optString("message") ?: "Unknown"}")
-                    false
-                }
-            } else {
-                credentialsManager.updateStatus("HTTP Error: $responseCode")
-                false
-            }
+            val response = executeRequest(
+                fullUrl = "$baseUrl/rest/ping?$authParams&f=json",
+                method = "GET"
+            )
+            return@withContext response != null
         } catch (e: Exception) {
-            credentialsManager.updateStatus("Failed: ${e.localizedMessage}")
+            Log.e(TAG, "Connection test failed", e)
             false
         }
     }
 
-    suspend fun fetchRandomAlbums(limit: Int = 10): List<Album> = withContext(Dispatchers.IO) {
-        val albums = mutableListOf<Album>()
-        val baseUrl = credentialsManager.getFullServerUrl()
-        val user = credentialsManager.getUsername()
-        val pass = credentialsManager.getPassword()
-
-        if (baseUrl.isBlank() || user.isBlank()) return@withContext albums
-
-        val salt = generateSalt()
-        val token = md5(pass + salt)
-        val auth = "u=$user&t=$token&s=$salt&$API_PARAMS"
-
-        val apiUrl = "$baseUrl/rest/getAlbumList2?$auth&type=random&size=$limit&f=json"
-
-        try {
-            val connection = URL(apiUrl).openConnection() as HttpURLConnection
-            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                val response = connection.inputStream.bufferedReader().readText()
-                val subsonic = JSONObject(response).getJSONObject("subsonic-response")
-
-                subsonic.optJSONObject("albumList2")?.optJSONArray("album")?.let { array ->
-                    for (i in 0 until array.length()) {
-                        val albumJson = array.getJSONObject(i)
-                        val id = albumJson.getString("id")
-                        val name = albumJson.getString("name")
-                        val artist = albumJson.optString("artist", "Unknown Artist")
-                        val artistId = albumJson.optString("artistId", "")
-
-                        val coverArtUrl = "$baseUrl/rest/getCoverArt?u=$user&t=$token&s=$salt&$API_PARAMS&id=$id&size=250"
-
-                        albums.add(Album(id, name, artist, artistId, coverArtUrl))
-                    }
-                }
-            }
-        } catch (e: Exception) { e.printStackTrace() }
-        return@withContext albums
-    }
-
-    suspend fun fetchAlbum(albumId: String): AlbumDetails? = fetchAlbumWithSource(albumId).album
-
-    suspend fun fetchAlbumWithSource(albumId: String): AlbumFetchResult = withContext(Dispatchers.IO) {
-        val baseUrl = credentialsManager.getFullServerUrl()
-        val user = credentialsManager.getUsername()
-        val pass = credentialsManager.getPassword()
-        val salt = generateSalt()
-        val token = md5(pass + salt)
-        val auth = "u=$user&t=$token&s=$salt&$API_PARAMS"
-
-        val url = "$baseUrl/rest/getAlbum?$auth&id=$albumId&f=json"
-
-        try {
-            val connection = URL(url).openConnection() as HttpURLConnection
-            if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                val response = connection.inputStream.bufferedReader().readText()
-                val albumJson = JSONObject(response).getJSONObject("subsonic-response").getJSONObject("album")
-
-                val tracks = mutableListOf<Track>()
-                val songArray = albumJson.optJSONArray("song")
-
-                songArray?.let {
-                    for (i in 0 until it.length()) {
-                        val s = it.getJSONObject(i)
-
-                        // Parse multiple artists
-                        val artists = mutableListOf<TrackArtist>()
-                        val artistArray = s.optJSONArray("artists")
-                        if (artistArray != null) {
-                            for (j in 0 until artistArray.length()) {
-                                val artObj = artistArray.getJSONObject(j)
-                                artists.add(TrackArtist(artObj.getString("id"), artObj.getString("name")))
-                            }
-                        } else {
-                            // Fallback to single artist if array is missing
-                            artists.add(TrackArtist(s.optString("artistId"), s.optString("artist")))
-                        }
-
-                        tracks.add(Track(
-                            id = s.getString("id"),
-                            title = s.getString("title"),
-                            artists = artists,
-                            number = s.optInt("track", 0),
-                            discNumber = s.optInt("discNumber", 1),
-                            duration = s.optInt("duration", 0)
-                        ))
-                    }
-                }
-
-                val fetchedAlbum = AlbumDetails(
-                    id = albumJson.getString("id"),
-                    name = albumJson.getString("name"),
-                    artist = albumJson.optString("artist", "Unknown"),
-                    artistId = albumJson.optString("artistId", ""),
-                    year = albumJson.optInt("year"),
-                    coverArtUrl = "$baseUrl/rest/getCoverArt?$auth&id=$albumId&size=600",
-                    tracks = tracks.sortedWith(compareBy({ it.discNumber }, { it.number }))
-                )
-                return@withContext AlbumFetchResult(
-                    album = offlineLibraryManager?.cacheAlbum(fetchedAlbum) ?: fetchedAlbum,
-                    fromOfflineCache = false
-                )
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-        return@withContext AlbumFetchResult(
-            album = offlineLibraryManager?.getCachedAlbum(albumId),
-            fromOfflineCache = true
-        )
-    }
-
+    /**
+     * Resolves the proper streaming URL for a given track id.
+     */
     suspend fun getStreamUrl(trackId: String): String {
         val baseUrl = credentialsManager.getFullServerUrl()
-        val user = credentialsManager.getUsername()
-        val pass = credentialsManager.getPassword()
-
+        val authParams = buildSubsonicAuthParams()
         val format = credentialsManager.getPreferredFormat()
         val bitrate = credentialsManager.getMaxBitrate()
-        val salt = generateSalt()
-        val token = md5(pass + salt)
-        val auth = "u=$user&t=$token&s=$salt&$API_PARAMS&id=$trackId"
+
+        val fullAuth = "$authParams&id=$trackId"
 
         if (format == "raw") {
-            // Use the original file endpoint directly so "RAW" never silently triggers transcoding.
-            return "$baseUrl/rest/download?$auth"
+            // Use original file download endpoint directly to bypass transcoding engine entirely
+            return "$baseUrl/rest/download?$fullAuth"
         }
 
-        var url = "$baseUrl/rest/stream?$auth&format=$format"
+        var url = "$baseUrl/rest/stream?$fullAuth&format=$format"
         if (bitrate > 0) {
             url += "&maxBitRate=$bitrate"
         }
         return url
     }
 
+    /**
+     * Resolves the proper Cover Art image URL using Subsonic fallback parameters.
+     */
+    suspend fun getCoverArtUrl(coverArtId: String): String {
+        val baseUrl = credentialsManager.getFullServerUrl()
+        if (baseUrl.isBlank() || coverArtId.isBlank()) return ""
+        val authParams = buildSubsonicAuthParams()
+        return "$baseUrl/rest/getCoverArt?$authParams&id=$coverArtId"
+    }
+
+    /**
+     * Fetches an album via Native API + separate song fetch.
+     */
+    suspend fun getAlbum(albumId: String): AlbumFetchResult = withContext(Dispatchers.IO) {
+        try {
+            // 1. Fetch album metadata
+            val albumJsonStr = performNativeRequest("/api/album/$albumId", "GET")
+            if (albumJsonStr != null) {
+                val albumJson = JSONObject(albumJsonStr)
+                val albumDetails = parseAlbumMetadata(albumJson)
+
+                // 2. Fetch tracks for this album
+                val songsJsonStr = performNativeRequest("/api/song?album_id=$albumId&_end=500", "GET")
+                if (songsJsonStr != null) {
+                    debugJsonPayload("AlbumTracksRaw_$albumId", songsJsonStr)
+                    val songsArray = JSONArray(songsJsonStr)
+                    albumDetails.tracks.clear()                    // ← Fixed: use clear() + addAll
+                    albumDetails.tracks.addAll(parseTracks(songsArray))
+                }
+
+                return@withContext AlbumFetchResult(
+                    album = offlineLibraryManager?.cacheAlbum(albumDetails) ?: albumDetails,
+                    fromOfflineCache = false
+                )
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch album via native network pipeline: $albumId", e)
+        }
+
+        // Fallback to offline cache
+        return@withContext AlbumFetchResult(
+            album = offlineLibraryManager?.getCachedAlbum(albumId),
+            fromOfflineCache = true
+        )
+    }
+
+    private suspend fun parseAlbumMetadata(json: JSONObject): AlbumDetails {
+        val id = json.optString("id")
+        val coverArtId = json.optString("coverArtId", json.optString("cover_art_id", id))
+
+        // Support multiple album artists
+        val albumArtists = mutableListOf<TrackArtist>()
+
+        val participants = json.optJSONObject("participants")
+        val albumArtistArray = participants?.optJSONArray("albumartist")
+
+        if (albumArtistArray != null && albumArtistArray.length() > 0) {
+            for (i in 0 until albumArtistArray.length()) {
+                val artistJson = albumArtistArray.optJSONObject(i) ?: continue
+                albumArtists.add(
+                    TrackArtist(
+                        id = artistJson.optString("id"),
+                        name = artistJson.optString("name")
+                    )
+                )
+            }
+        } else {
+            // Fallback to single artist
+            val mainArtistName = json.optString("albumArtist", json.optString("artist"))
+            val mainArtistId = json.optString("albumArtistId", json.optString("artistId"))
+            if (mainArtistName.isNotEmpty()) {
+                albumArtists.add(TrackArtist(id = mainArtistId, name = mainArtistName))
+            }
+        }
+
+        val mainArtist = albumArtists.firstOrNull() ?: TrackArtist("", "")
+
+        return AlbumDetails(
+            id = id,
+            name = json.optString("name"),
+            artist = mainArtist.name,
+            artistId = mainArtist.id,
+            artists = albumArtists,                    // ← NEW
+            year = json.optInt("maxYear", json.optInt("year", 0)).takeIf { it > 0 },
+            coverArtUrl = getCoverArtUrl(coverArtId),
+            tracks = mutableListOf()
+        )
+    }
+
+    private fun parseTracks(songsArray: JSONArray): List<Track> {
+        val tracksList = mutableListOf<Track>()
+
+        for (i in 0 until songsArray.length()) {
+            val songJson = songsArray.optJSONObject(i) ?: continue
+
+            val trackArtists = mutableListOf<TrackArtist>()
+
+            // Best source: artists array
+            val artistsArray = songJson.optJSONArray("artists")
+                ?: songJson.optJSONObject("participants")?.optJSONArray("artist")
+
+            if (artistsArray != null) {
+                for (j in 0 until artistsArray.length()) {
+                    val artistJson = artistsArray.optJSONObject(j) ?: continue
+                    trackArtists.add(
+                        TrackArtist(
+                            id = artistJson.optString("id"),
+                            name = artistJson.optString("name")
+                        )
+                    )
+                }
+            } else {
+                // Fallback
+                val artistName = songJson.optString("artist", songJson.optString("artistName"))
+                if (artistName.isNotEmpty()) {
+                    trackArtists.add(
+                        TrackArtist(
+                            id = songJson.optString("artistId", songJson.optString("artist_id")),
+                            name = artistName
+                        )
+                    )
+                }
+            }
+
+            tracksList.add(
+                Track(
+                    id = songJson.optString("id"),
+                    title = songJson.optString("title"),
+                    artists = trackArtists,
+                    number = songJson.optInt("trackNumber", songJson.optInt("track_number", i + 1)),
+                    discNumber = songJson.optInt("discNumber", songJson.optInt("disc_number", 1)),
+                    duration = songJson.optInt("duration", 0)
+                )
+            )
+        }
+
+        // ← SORT: First by disc number, then by track number
+        return tracksList.sortedWith(
+            compareBy<Track> { it.discNumber }
+                .thenBy { it.number }
+        )
+    }
+
+    /**
+     * Fetches a list of random albums from the native Navidrome API.
+     */
+    suspend fun getRandomAlbums(limit: Int = 20): List<Album> = withContext(Dispatchers.IO) {
+        if (!ensureNativeAuth()) {
+            Log.e(TAG, "Native authentication failed while fetching random albums.")
+            return@withContext emptyList()
+        }
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        try {
+            // Native API uses _sort=random and _end for setting an upper result boundary
+            val url = URL("$baseUrl/api/album?_sort=random&_end=$limit")
+            val urlConnection = url.openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "GET"
+            urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
+            urlConnection.setRequestProperty("x-nd-client-unique-id", nativeClientId)
+
+            if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
+                val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
+                debugJsonPayload("NavidromeManager_Random", rawJson)
+
+                val jsonArray = JSONArray(rawJson)
+                val albumsList = mutableListOf<Album>()
+
+                for (i in 0 until jsonArray.length()) {
+                    val json = jsonArray.getJSONObject(i)
+                    val albumId = json.optString("id")
+
+                    albumsList.add(
+                        Album(
+                            id = albumId,
+                            name = json.optString("name"),
+                            artist = json.optString("albumArtist", json.optString("artist_name")),  // prefer albumArtist
+                            artistId = json.optString("albumArtistId", json.optString("artist_id")),
+                            coverArtUrl = getCoverArtUrl(albumId),  // or json.optString("art") / "coverArtId"
+                            year = json.optInt("maxYear", json.optInt("year")),
+                            type = "album"  // or parse from tags/compilation
+                        )
+                    )
+                }
+                return@withContext albumsList
+            } else {
+                Log.e(TAG, "Failed to fetch random albums. Response code: ${urlConnection.responseCode}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception during random album fetch", e)
+        }
+        return@withContext emptyList()
+    }
+
+    suspend fun fetchArtist(artistId: String): ArtistDetails? = withContext(Dispatchers.IO) {
+        try {
+            if (!ensureNativeAuth()) return@withContext null
+
+            // 1. Fetch artist metadata
+            val artistJsonStr = performNativeRequest("/api/artist/$artistId", "GET")
+            if (artistJsonStr == null) return@withContext null
+
+            val artistJson = JSONObject(artistJsonStr)
+            val artistDetails = parseArtist(artistJson)
+
+            // 2. Fetch albums by this artist
+            val albumsJsonStr = performNativeRequest(
+                "/api/album?artist_id=$artistId&_end=200&_sort=maxYear&_order=DESC",
+                "GET"
+            )
+
+            if (albumsJsonStr != null) {
+                val albumsArray = JSONArray(albumsJsonStr)
+                artistDetails.albums.clear()
+                artistDetails.albums.addAll(parseArtistAlbums(albumsArray))
+            }
+
+            return@withContext artistDetails
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch artist: $artistId", e)
+            null
+        }
+    }
+
+    private suspend fun parseArtist(json: JSONObject): ArtistDetails {
+        val id = json.optString("id")
+        val coverArtId = json.optString("coverArtId", json.optString("cover_art_id", id))
+
+        return ArtistDetails(
+            id = id,
+            name = json.optString("name"),
+            coverArtUrl = getCoverArtUrl(coverArtId),
+            albums = mutableListOf()
+        )
+    }
+
+    private suspend fun parseArtistAlbums(albumsArray: JSONArray): List<Album> {
+        val albums = mutableListOf<Album>()
+
+        for (i in 0 until albumsArray.length()) {
+            val json = albumsArray.optJSONObject(i) ?: continue
+
+            albums.add(
+                Album(
+                    id = json.optString("id"),
+                    name = json.optString("name"),
+                    artist = json.optString("albumArtist", json.optString("artist")),
+                    artistId = json.optString("albumArtistId", json.optString("artistId")),
+                    coverArtUrl = getCoverArtUrl(json.optString("id")),
+                    year = json.optInt("maxYear", json.optInt("year")),
+                    type = if (json.optBoolean("compilation", false)) "compilation" else "album"
+                )
+            )
+        }
+        return albums
+    }
+
+    // =========================================================================
+    // CORE NETWORKING AND AUTHENTICATION WRAPPERS
+    // =========================================================================
+
+    /**
+     * Pipelines an authenticated Native API request, auto-logging and validating session states.
+     */
+    private suspend fun performNativeRequest(endpoint: String, method: String, payload: String? = null): String? {
+        if (!ensureNativeAuth()) {
+            Log.e(TAG, "Aborting native execution: Authentication failed.")
+            return null
+        }
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        val headers = mapOf(
+            "x-nd-authorization" to "Bearer $nativeToken",
+            "x-nd-client-unique-id" to nativeClientId,
+            "Content-Type" to "application/json"
+        )
+
+        val response = executeRequest("$baseUrl$endpoint", method, payload, headers)
+        debugJsonPayload(TAG, response)
+        return response
+    }
+
+    /**
+     * Executes any basic HTTP transaction safely, abstracting boilerplate input/output streams.
+     */
+    private suspend fun executeRequest(
+        fullUrl: String,
+        method: String,
+        payload: String? = null,
+        headers: Map<String, String> = emptyMap()
+    ): String? = withContext(Dispatchers.IO) {
+        var connection: HttpURLConnection? = null
+        try {
+            val url = URL(fullUrl)
+            connection = (url.openConnection() as HttpURLConnection).apply {
+                requestMethod = method
+                connectTimeout = 10000
+                readTimeout = 15000
+                doInput = true
+
+                // Inject custom headers map
+                headers.forEach { (key, value) -> setRequestProperty(key, value) }
+
+                // Inject Body if present
+                if (payload != null && (method == "POST" || method == "PUT")) {
+                    doOutput = true
+                    outputStream.use { os ->
+                        os.write(payload.toByteArray(Charsets.UTF_8))
+                    }
+                }
+            }
+
+            val responseCode = connection.responseCode
+            if (responseCode in 200..299) {
+                connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+            } else {
+                val errorMsg = connection.errorStream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }
+                Log.e(TAG, "HTTP Error Status $responseCode executing $method to $fullUrl: $errorMsg")
+                null
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Network transport failure during request connection processing", e)
+            null
+        } finally {
+            connection?.disconnect()
+        }
+    }
+
+    /**
+     * Logic for native token persistence/initialization flow.
+     */
+    private suspend fun ensureNativeAuth(): Boolean = withContext(Dispatchers.IO) {
+        if (nativeToken != null) return@withContext true
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        val user = credentialsManager.getUsername()
+        val pass = credentialsManager.getPassword()
+        if (baseUrl.isBlank() || user.isBlank() || pass.isBlank()) return@withContext false
+
+        val authPayload = JSONObject().apply {
+            put("username", user)
+            put("password", pass)
+        }.toString()
+
+        val response = executeRequest(
+            fullUrl = "$baseUrl/auth/login",
+            method = "POST",
+            payload = authPayload,
+            headers = mapOf("Content-Type" to "application/json")
+        )
+
+        if (response != null) {
+            try {
+                val json = JSONObject(response)
+                nativeToken = json.optString("token", "")
+                return@withContext nativeToken != null
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed parsing Native API JWT Authentication payload", e)
+            }
+        }
+        return@withContext false
+    }
+
+    /**
+     * Builds standard URL query parameters for Subsonic compatibility endpoints.
+     */
+    private suspend fun buildSubsonicAuthParams(explicitUser: String? = null, explicitPass: String? = null): String {
+        val user = explicitUser ?: credentialsManager.getUsername()
+        val pass = explicitPass ?: credentialsManager.getPassword()
+        val salt = generateSalt()
+        val token = md5(pass + salt)
+        return "u=$user&t=$token&s=$salt&$API_PARAMS"
+    }
+
     private fun generateSalt(): String = (1..6).map {
         (('A'..'Z') + ('a'..'z') + ('0'..'9')).random()
     }.joinToString("")
+
+    // =========================================================================
+    // JSON PARSING LOGIC
+    // =========================================================================
+
+    /**
+     * Maps the native response into your application's defined [AlbumDetails] entity structure.
+     */
+    private suspend fun parseAlbumDetails(json: JSONObject): AlbumDetails {
+        val id = json.optString("id")
+        val coverArtId = json.optString("cover_art_id", id)  // or "art" / "coverArtId" depending on version
+
+        // Top-level album artist (preferred)
+        val albumArtistId = json.optString("albumArtistId", json.optString("album_artist_id"))
+        val albumArtistName = json.optString("albumArtist", json.optString("album_artist", json.optString("artist_name")))
+
+        val tracksList = mutableListOf<Track>()
+
+        // Navidrome native API typically uses "songs"
+        val songsArray = json.optJSONArray("songs")
+            ?: json.optJSONArray("tracks")
+            ?: JSONArray()  // fallback
+
+        for (i in 0 until songsArray.length()) {
+            val songJson = songsArray.optJSONObject(i) ?: continue
+
+            val trackArtists = mutableListOf<TrackArtist>()
+
+            // Primary: full artists array (most common in recent Navidrome)
+            val artistsArray = songJson.optJSONArray("artists")
+            if (artistsArray != null && artistsArray.length() > 0) {
+                for (j in 0 until artistsArray.length()) {
+                    val artistJson = artistsArray.optJSONObject(j) ?: continue
+                    trackArtists.add(
+                        TrackArtist(
+                            id = artistJson.optString("id"),
+                            name = artistJson.optString("name")
+                        )
+                    )
+                }
+            } else {
+                // Fallbacks
+                val artistId = songJson.optString("artistId", songJson.optString("artist_id"))
+                val artistName = songJson.optString("artist", songJson.optString("artist_name"))
+                if (artistName.isNotEmpty()) {
+                    trackArtists.add(TrackArtist(id = artistId, name = artistName))
+                }
+            }
+
+            tracksList.add(
+                Track(
+                    id = songJson.optString("id"),
+                    title = songJson.optString("title"),
+                    artists = trackArtists,
+                    number = songJson.optInt("trackNumber", songJson.optInt("track_number", songJson.optInt("number", i + 1))),
+                    discNumber = songJson.optInt("discNumber", songJson.optInt("disc_number", 1)),
+                    duration = songJson.optInt("duration", 0)  // usually in seconds
+                )
+            )
+        }
+
+        return AlbumDetails(
+            id = id,
+            name = json.optString("name"),
+            artist = albumArtistName,           // ← Fixed for album artist
+            artistId = albumArtistId,
+            year = if (json.has("year") || json.has("maxYear")) {
+                json.optInt("year", json.optInt("maxYear"))
+            } else null,
+            coverArtUrl = getCoverArtUrl(coverArtId),
+            tracks = tracksList
+        )
+    }
+}
+
+// =========================================================================
+// GLOBAL LOGGER HELPERS
+// =========================================================================
+
+fun debugJsonPayload(tag: String, rawJson: String?) {
+    if (rawJson.isNullOrBlank()) {
+        Log.w(tag, "Incoming JSON payload is completely empty or null.")
+        return
+    }
+
+    val trimmed = rawJson.trim()
+    try {
+        val prettyPrintedJson = if (trimmed.startsWith("[")) {
+            JSONArray(trimmed).toString(4)
+        } else if (trimmed.startsWith("{")) {
+            JSONObject(trimmed).toString(4)
+        } else {
+            "Not a valid JSON format. Raw text:\n$trimmed"
+        }
+
+        val maxLogSize = 3000
+        var i = 0
+        Log.d(tag, "╔═════════════════════ RECEIVING INCOMING JSON ═════════════════════╗")
+        while (i < prettyPrintedJson.length) {
+            val end = minOf(i + maxLogSize, prettyPrintedJson.length)
+            Log.d(tag, prettyPrintedJson.substring(i, end))
+            i += maxLogSize
+        }
+        Log.d(tag, "╚═══════════════════════════════════════════════════════════════════╝")
+    } catch (e: Exception) {
+        Log.e(tag, "Failed to print structured JSON payload diagnostic", e)
+    }
 }

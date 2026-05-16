@@ -5,17 +5,20 @@ data class Album(
     val name: String,
     val artist: String,
     val artistId: String,
-    val coverArtUrl: String
+    val coverArtUrl: String,
+    val year: Int? = null,
+    val type: String? = null
 )
 
 data class AlbumDetails(
     val id: String,
     val name: String,
-    val artist: String,
-    val artistId: String,
+    val artist: String,           // keep for backward compatibility
+    val artistId: String,         // keep for backward compatibility (main artist)
+    val artists: List<TrackArtist> = emptyList(),  // ← NEW: full list
     val year: Int?,
     val coverArtUrl: String,
-    val tracks: List<Track>
+    val tracks: MutableList<Track> = mutableListOf()
 )
 
 data class Track(
@@ -30,4 +33,11 @@ data class Track(
 data class TrackArtist(
     val id: String,
     val name: String
+)
+
+data class ArtistDetails(
+    val id: String,
+    val name: String,
+    val coverArtUrl: String,
+    val albums: MutableList<Album> = mutableListOf()
 )
