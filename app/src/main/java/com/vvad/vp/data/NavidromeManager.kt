@@ -128,6 +128,139 @@ class NavidromeManager(
     }
 
     /**
+     * Fetches recently played albums using native API.
+     */
+    suspend fun getRecentlyPlayedAlbums(limit: Int = 10): List<Album> = withContext(Dispatchers.IO) {
+        if (!ensureNativeAuth()) {
+            Log.e(TAG, "Native authentication failed while fetching recently played albums.")
+            return@withContext emptyList()
+        }
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        try {
+            // Use recently_played filter + sort by play_date
+            val url = URL("$baseUrl/api/album?_sort=play_date&_order=DESC&_end=$limit&recently_played=true")
+            val urlConnection = url.openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "GET"
+            urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
+            urlConnection.setRequestProperty("x-nd-client-unique-id", nativeClientId)
+
+            if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
+                val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
+                debugJsonPayload("NavidromeManager_RecentlyPlayed", rawJson)
+
+                val jsonArray = JSONArray(rawJson)
+                return@withContext parseAlbumList(jsonArray)
+            } else {
+                Log.e(TAG, "Failed to fetch recently played albums. Response code: ${urlConnection.responseCode}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception during recently played albums fetch", e)
+        }
+        return@withContext emptyList()
+    }
+
+    /**
+     * Fetches most played albums (sorted by play count).
+     */
+    suspend fun getMostPlayedAlbums(limit: Int = 10): List<Album> = withContext(Dispatchers.IO) {
+        if (!ensureNativeAuth()) {
+            Log.e(TAG, "Native authentication failed while fetching most played albums.")
+            return@withContext emptyList()
+        }
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        try {
+            val url = URL("$baseUrl/api/album?_sort=play_count&_order=DESC&_end=$limit")
+            val urlConnection = url.openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "GET"
+            urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
+            urlConnection.setRequestProperty("x-nd-client-unique-id", nativeClientId)
+
+            if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
+                val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
+                debugJsonPayload("NavidromeManager_MostPlayedAlbums", rawJson)
+
+                val jsonArray = JSONArray(rawJson)
+                return@withContext parseAlbumList(jsonArray)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception during most played albums fetch", e)
+        }
+        return@withContext emptyList()
+    }
+
+    /**
+     * Fetches most played artists.
+     */
+    suspend fun getMostPlayedArtists(limit: Int = 10): List<Album> = withContext(Dispatchers.IO) {
+        if (!ensureNativeAuth()) {
+            Log.e(TAG, "Native authentication failed while fetching most played artists.")
+            return@withContext emptyList()
+        }
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        try {
+            val url = URL("$baseUrl/api/artist?_sort=play_count&_order=DESC&_end=$limit")
+            val urlConnection = url.openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "GET"
+            urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
+            urlConnection.setRequestProperty("x-nd-client-unique-id", nativeClientId)
+
+            if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
+                val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
+                debugJsonPayload("NavidromeManager_MostPlayedArtists", rawJson)
+
+                val jsonArray = JSONArray(rawJson)
+                val artistsList = mutableListOf<Album>()
+                val smallSize = credentialsManager.getCoverSizeSmall()
+
+                for (i in 0 until jsonArray.length()) {
+                    val json = jsonArray.getJSONObject(i)
+
+                    artistsList.add(
+                        Album(
+                            id = json.optString("id"),
+                            name = json.optString("name"),
+                            artist = json.optString("name"),
+                            artistId = json.optString("id"),
+                            coverArtUrl = getCoverArtUrl(json.optString("id"), smallSize),
+                            year = 0,
+                            type = "artist"
+                        )
+                    )
+                }
+                return@withContext artistsList
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception during most played artists fetch", e)
+        }
+        return@withContext emptyList()
+    }
+
+    private suspend fun parseAlbumList(jsonArray: JSONArray): List<Album> {
+        val albumsList = mutableListOf<Album>()
+        val smallSize = credentialsManager.getCoverSizeSmall()
+
+        for (i in 0 until jsonArray.length()) {
+            val json = jsonArray.getJSONObject(i)
+
+            albumsList.add(
+                Album(
+                    id = json.optString("id"),
+                    name = json.optString("name"),
+                    artist = json.optString("albumArtist", json.optString("artist")),
+                    artistId = json.optString("albumArtistId", json.optString("artist_id")),
+                    coverArtUrl = getCoverArtUrl(json.optString("id"), smallSize),
+                    year = json.optInt("maxYear", json.optInt("year")),
+                    type = "album"
+                )
+            )
+        }
+        return albumsList
+    }
+
+    /**
      * Fetches an album via Native API + separate song fetch.
      */
     suspend fun getAlbum(albumId: String): AlbumFetchResult = withContext(Dispatchers.IO) {
@@ -271,8 +404,9 @@ class NavidromeManager(
         }
 
         val baseUrl = credentialsManager.getFullServerUrl()
+        val smallSize = credentialsManager.getCoverSizeSmall()
+
         try {
-            // Native API uses _sort=random and _end for setting an upper result boundary
             val url = URL("$baseUrl/api/album?_sort=random&_end=$limit")
             val urlConnection = url.openConnection() as HttpURLConnection
             urlConnection.requestMethod = "GET"
@@ -288,25 +422,20 @@ class NavidromeManager(
 
                 for (i in 0 until jsonArray.length()) {
                     val json = jsonArray.getJSONObject(i)
-                    val albumId = json.optString("id")
-
-                    val smallSize = credentialsManager.getCoverSizeSmall()
 
                     albumsList.add(
                         Album(
-                            id = albumId,
+                            id = json.optString("id"),
                             name = json.optString("name"),
                             artist = json.optString("albumArtist", json.optString("artist_name")),
                             artistId = json.optString("albumArtistId", json.optString("artist_id")),
-                            coverArtUrl = getCoverArtUrl(albumId, smallSize),   // ← Small
+                            coverArtUrl = getCoverArtUrl(json.optString("id"), smallSize),
                             year = json.optInt("maxYear", json.optInt("year")),
                             type = "album"
                         )
                     )
                 }
                 return@withContext albumsList
-            } else {
-                Log.e(TAG, "Failed to fetch random albums. Response code: ${urlConnection.responseCode}")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during random album fetch", e)

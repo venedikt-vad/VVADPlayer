@@ -5,48 +5,37 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.compose.AsyncImagePainter
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.ui.models.Album
 import kotlinx.coroutines.delay
 
 private enum class HomeMode {
-    Online,
-    Offline
+    Online, Offline
 }
 
 @Composable
@@ -58,7 +47,11 @@ fun HomeScreen(
 ) {
     var randomAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var offlineAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
+    var recentlyPlayed by remember { mutableStateOf<List<Album>>(emptyList()) }
+    var mostPlayedAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
+    var mostPlayedArtists by remember { mutableStateOf<List<Album>>(emptyList()) }
     var homeMode by remember { mutableStateOf(HomeMode.Online) }
+
     val isNetworkAvailable by rememberNetworkAvailability()
 
     LaunchedEffect(isNetworkAvailable) {
@@ -67,6 +60,10 @@ fun HomeScreen(
 
             if (isNetworkAvailable) {
                 val fetchedAlbums = navidromeManager.getRandomAlbums(limit = 10)
+                recentlyPlayed = navidromeManager.getRecentlyPlayedAlbums(limit = 8)
+                mostPlayedAlbums = navidromeManager.getMostPlayedAlbums(limit = 8)
+                mostPlayedArtists = navidromeManager.getMostPlayedArtists(limit = 8)
+
                 if (fetchedAlbums.isNotEmpty()) {
                     randomAlbums = fetchedAlbums
                     homeMode = HomeMode.Online
@@ -80,104 +77,146 @@ fun HomeScreen(
                 homeMode = HomeMode.Offline
             }
 
-            delay(if (homeMode == HomeMode.Offline) 15_000 else 60_000)
+            delay(if (homeMode == HomeMode.Offline) 15_000L else 60_000L)
         }
     }
 
-    Column(
+    LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         if (homeMode == HomeMode.Offline) {
-            Text(
-                text = if (isNetworkAvailable) "Cached Albums" else "Offline Library",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 8.dp)
-            )
+            item {
+                Text(
+                    text = if (isNetworkAvailable) "Cached Albums" else "Offline Library",
+                    style = MaterialTheme.typography.titleLarge,
+                )
+            }
 
-            Text(
-                text = if (isNetworkAvailable) {
-                    "Server is unreachable right now. Showing cached albums."
-                } else {
-                    "No network connection. Showing cached albums."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 16.dp)
-            )
+            item {
+                Text(
+                    text = if (isNetworkAvailable) {
+                        "Server is unreachable right now. Showing cached albums."
+                    } else {
+                        "No network connection. Showing cached albums."
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
 
             if (offlineAlbums.isEmpty()) {
-                Text(
-                    text = "No cached albums available yet. Download an album while online to use it offline.",
-                    style = MaterialTheme.typography.bodyMedium
-                )
+                item {
+                    Text(
+                        text = "No cached albums available yet. Download an album while online to use it offline.",
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
             } else {
-                LazyVerticalGrid(
-                    columns = GridCells.Adaptive(minSize = 130.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp),
-                    modifier = Modifier.fillMaxSize()
-                ) {
-                    items(offlineAlbums, key = { it.id }) { album ->
-                        AlbumTile(
-                            album = album,
-                            onAlbumClick = { onAlbumClick(album.id) },
-                            onArtistClick = {
-                                if (album.artistId.isNotBlank()) {
-                                    onArtistClick(album.artistId)
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-        } else {
-            if (offlineAlbums.isNotEmpty()) {
-                Text(
-                    text = "Available Offline",
-                    style = MaterialTheme.typography.titleLarge,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
-
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(16.dp),
-                    modifier = Modifier.padding(bottom = 24.dp)
-                ) {
-                    items(offlineAlbums, key = { it.id }) { album ->
-                        AlbumTile(
-                            album = album,
-                            onAlbumClick = { onAlbumClick(album.id) },
-                            onArtistClick = {
-                                if (album.artistId.isNotBlank()) {
-                                    onArtistClick(album.artistId)
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-
-            Text(
-                text = "Random Albums",
-                style = MaterialTheme.typography.titleLarge,
-                modifier = Modifier.padding(bottom = 12.dp)
-            )
-
-            LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                items(randomAlbums, key = { it.id }) { album ->
+                items(offlineAlbums, key = { it.id }) { album ->
                     AlbumTile(
                         album = album,
                         onAlbumClick = { onAlbumClick(album.id) },
-                        onArtistClick = { onArtistClick(album.artistId) }
+                        onArtistClick = {
+                            if (album.artistId.isNotBlank()) onArtistClick(album.artistId)
+                        }
                     )
                 }
+            }
+        } else {
+            // Available Offline
+            if (offlineAlbums.isNotEmpty()) {
+                item { Text("Available Offline", style = MaterialTheme.typography.titleLarge) }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        items(offlineAlbums, key = { it.id }) { album ->
+                            AlbumTile(
+                                album = album,
+                                onAlbumClick = { onAlbumClick(album.id) },
+                                onArtistClick = {
+                                    if (album.artistId.isNotBlank()) onArtistClick(album.artistId)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            randomAlbumsSection(randomAlbums, onAlbumClick, onArtistClick)
+            if (recentlyPlayed.isNotEmpty()) {
+                section("Recently Played", recentlyPlayed, onAlbumClick, onArtistClick)
+            }
+            if (mostPlayedAlbums.isNotEmpty()) {
+                section("Most Played Albums", mostPlayedAlbums, onAlbumClick, onArtistClick)
+            }
+            if (mostPlayedArtists.isNotEmpty()) {
+                artistsSection(mostPlayedArtists, onArtistClick)
             }
         }
     }
 }
+
+// ==================== LAZY LIST SECTIONS ====================
+
+private fun LazyListScope.randomAlbumsSection(
+    albums: List<Album>,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit
+) {
+    item { Text("Random Albums", style = MaterialTheme.typography.titleLarge) }
+    item {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(albums, key = { it.id }) { album ->
+                AlbumTile(
+                    album = album,
+                    onAlbumClick = { onAlbumClick(album.id) },
+                    onArtistClick = { onArtistClick(album.artistId) }
+                )
+            }
+        }
+    }
+}
+
+private fun LazyListScope.section(
+    title: String,
+    albums: List<Album>,
+    onAlbumClick: (String) -> Unit,
+    onArtistClick: (String) -> Unit
+) {
+    item { Text(title, style = MaterialTheme.typography.titleLarge) }
+    item {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(albums, key = { it.id }) { album ->
+                AlbumTile(
+                    album = album,
+                    onAlbumClick = { onAlbumClick(album.id) },
+                    onArtistClick = { onArtistClick(album.artistId) }
+                )
+            }
+        }
+    }
+}
+
+private fun LazyListScope.artistsSection(
+    artists: List<Album>,
+    onArtistClick: (String) -> Unit
+) {
+    item { Text("Most Played Artists", style = MaterialTheme.typography.titleLarge) }
+    item {
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            items(artists, key = { it.id }) { artist ->
+                ArtistTile(
+                    artist = artist,
+                    onClick = { onArtistClick(artist.artistId) }
+                )
+            }
+        }
+    }
+}
+
+// ==================== NETWORK AVAILABILITY (Moved Up) ====================
 
 @Composable
 private fun rememberNetworkAvailability(): State<Boolean> {
@@ -185,8 +224,7 @@ private fun rememberNetworkAvailability(): State<Boolean> {
     val isAvailable = remember { mutableStateOf(context.isNetworkAvailable()) }
 
     DisposableEffect(context) {
-        val connectivityManager =
-            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
 
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
@@ -201,8 +239,7 @@ private fun rememberNetworkAvailability(): State<Boolean> {
                 network: Network,
                 networkCapabilities: NetworkCapabilities
             ) {
-                isAvailable.value =
-                    networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                isAvailable.value = networkCapabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             }
         }
 
@@ -211,6 +248,7 @@ private fun rememberNetworkAvailability(): State<Boolean> {
             .build()
 
         connectivityManager.registerNetworkCallback(request, callback)
+
         onDispose {
             runCatching { connectivityManager.unregisterNetworkCallback(callback) }
         }
@@ -220,12 +258,13 @@ private fun rememberNetworkAvailability(): State<Boolean> {
 }
 
 private fun Context.isNetworkAvailable(): Boolean {
-    val connectivityManager =
-        getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+    val connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     val network = connectivityManager.activeNetwork ?: return false
     val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
     return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
+
+// ==================== ALBUM TILE (Square) ====================
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -234,18 +273,43 @@ fun AlbumTile(
     onAlbumClick: () -> Unit,
     onArtistClick: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.width(130.dp)
-    ) {
-        AsyncImage(
-            model = album.coverArtUrl,
-            contentDescription = album.name,
-            contentScale = ContentScale.Crop,
+    var imageState by remember { mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Empty) }
+
+    val pulseAlpha by rememberInfiniteTransition(label = "pulse").animateFloat(
+        initialValue = 0.65f,
+        targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    Column(modifier = Modifier.width(130.dp)) {
+        Box(
             modifier = Modifier
                 .size(130.dp)
                 .clip(RoundedCornerShape(3.dp))
                 .clickable { onAlbumClick() }
-        )
+        ) {
+            AsyncImage(
+                model = album.coverArtUrl,
+                contentDescription = album.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                onState = { imageState = it }
+            )
+
+            if (imageState is AsyncImagePainter.State.Loading ||
+                imageState is AsyncImagePainter.State.Empty) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(3.dp))
+                        .background(Color.Gray.copy(alpha = pulseAlpha))
+                )
+            }
+        }
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -258,10 +322,7 @@ fun AlbumTile(
                 text = album.name,
                 style = MaterialTheme.typography.bodyMedium,
                 maxLines = 1,
-                modifier = Modifier.basicMarquee(
-                    iterations = Int.MAX_VALUE,
-                    delayMillis = 2000
-                )
+                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, delayMillis = 2000)
             )
 
             Text(
@@ -269,11 +330,67 @@ fun AlbumTile(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.secondary,
                 maxLines = 1,
-                modifier = Modifier.basicMarquee(
-                    iterations = Int.MAX_VALUE,
-                    delayMillis = 2000
-                )
+                modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, delayMillis = 2000)
             )
         }
+    }
+}
+
+// ==================== ARTIST TILE (Circular) ====================
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun ArtistTile(
+    artist: Album,
+    onClick: () -> Unit
+) {
+    var imageState by remember { mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Empty) }
+
+    val pulseAlpha by rememberInfiniteTransition(label = "artist_pulse").animateFloat(
+        initialValue = 0.65f,
+        targetValue = 0.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        )
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.width(110.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(110.dp)
+                .clip(CircleShape)
+                .clickable { onClick() }
+        ) {
+            AsyncImage(
+                model = artist.coverArtUrl,
+                contentDescription = artist.name,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+                onState = { imageState = it }
+            )
+
+            if (imageState is AsyncImagePainter.State.Loading ||
+                imageState is AsyncImagePainter.State.Empty) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .background(Color.Gray.copy(alpha = pulseAlpha))
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, delayMillis = 2000)
+        )
     }
 }
