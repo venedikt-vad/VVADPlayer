@@ -40,21 +40,48 @@ class NavidromeManager(
     // =========================================================================
 
     /**
-     * Pings the server using the Subsonic compatibility endpoint to test configuration.
+     * Tests connection to Navidrome server with detailed logging.
+     * Also updates the status in CredentialsManager.
      */
-    suspend fun testConnection(server: String, user: String, pass: String, https: Boolean): Boolean = withContext(Dispatchers.IO) {
+    suspend fun testConnection(
+        server: String,
+        user: String,
+        pass: String,
+        https: Boolean
+    ): Boolean = withContext(Dispatchers.IO) {
+        val tag = "Navidrome_ConnectionTest"
+
+        Log.i(tag, "=== STARTING CONNECTION TEST ===")
+        Log.i(tag, "Server: $server | HTTPS: $https | User: $user")
+
         try {
             val protocol = if (https) "https://" else "http://"
             val baseUrl = if (server.startsWith("http")) server else "$protocol$server"
-            val authParams = buildSubsonicAuthParams(user, pass)
+            Log.i(tag, "Base URL: $baseUrl")
 
-            val response = executeRequest(
-                fullUrl = "$baseUrl/rest/ping?$authParams&f=json",
-                method = "GET"
-            )
-            return@withContext response != null
+            // Clean up base URL
+            val cleanBaseUrl = baseUrl.trimEnd('/')
+
+            val authParams = buildSubsonicAuthParams(user, pass)
+            val testUrl = "$cleanBaseUrl/rest/ping?$authParams&f=json"
+
+            Log.i(tag, "Testing endpoint: $testUrl")
+
+            val response = executeRequest(fullUrl = testUrl, method = "GET")
+
+            return@withContext if (response != null) {
+                Log.i(tag, "✅ Connection SUCCESSFUL")
+                credentialsManager.updateStatus("Connected")
+                true
+            } else {
+                Log.e(tag, "❌ Connection FAILED - No response or error")
+                credentialsManager.updateStatus("Connection Failed")
+                false
+            }
+
         } catch (e: Exception) {
-            Log.e(TAG, "Connection test failed", e)
+            Log.e(tag, "💥 Connection test crashed with exception", e)
+            credentialsManager.updateStatus("Error: ${e::class.simpleName}")
             false
         }
     }
@@ -83,13 +110,21 @@ class NavidromeManager(
     }
 
     /**
-     * Resolves the proper Cover Art image URL using Subsonic fallback parameters.
+     * Returns cover art URL with optional size parameter.
+     * @param coverArtId The ID of the cover
+     * @param size Optional target size in pixels (Navidrome will scale to this)
      */
-    suspend fun getCoverArtUrl(coverArtId: String): String {
+    suspend fun getCoverArtUrl(coverArtId: String, size: Int? = null): String {
         val baseUrl = credentialsManager.getFullServerUrl()
         if (baseUrl.isBlank() || coverArtId.isBlank()) return ""
+
         val authParams = buildSubsonicAuthParams()
-        return "$baseUrl/rest/getCoverArt?$authParams&id=$coverArtId"
+        var url = "$baseUrl/rest/getCoverArt?$authParams&id=$coverArtId"
+
+        size?.let {
+            url += "&size=$it"
+        }
+        return url
     }
 
     /**
@@ -158,6 +193,7 @@ class NavidromeManager(
         }
 
         val mainArtist = albumArtists.firstOrNull() ?: TrackArtist("", "")
+        val largeSize = credentialsManager.getCoverSizeLarge()
 
         return AlbumDetails(
             id = id,
@@ -166,7 +202,7 @@ class NavidromeManager(
             artistId = mainArtist.id,
             artists = albumArtists,                    // ← NEW
             year = json.optInt("maxYear", json.optInt("year", 0)).takeIf { it > 0 },
-            coverArtUrl = getCoverArtUrl(coverArtId),
+            coverArtUrl = getCoverArtUrl(coverArtId, largeSize),
             tracks = mutableListOf()
         )
     }
@@ -254,15 +290,17 @@ class NavidromeManager(
                     val json = jsonArray.getJSONObject(i)
                     val albumId = json.optString("id")
 
+                    val smallSize = credentialsManager.getCoverSizeSmall()
+
                     albumsList.add(
                         Album(
                             id = albumId,
                             name = json.optString("name"),
-                            artist = json.optString("albumArtist", json.optString("artist_name")),  // prefer albumArtist
+                            artist = json.optString("albumArtist", json.optString("artist_name")),
                             artistId = json.optString("albumArtistId", json.optString("artist_id")),
-                            coverArtUrl = getCoverArtUrl(albumId),  // or json.optString("art") / "coverArtId"
+                            coverArtUrl = getCoverArtUrl(albumId, smallSize),   // ← Small
                             year = json.optInt("maxYear", json.optInt("year")),
-                            type = "album"  // or parse from tags/compilation
+                            type = "album"
                         )
                     )
                 }
@@ -323,6 +361,7 @@ class NavidromeManager(
 
         for (i in 0 until albumsArray.length()) {
             val json = albumsArray.optJSONObject(i) ?: continue
+            val smallSize = credentialsManager.getCoverSizeSmall()
 
             albums.add(
                 Album(
@@ -330,7 +369,7 @@ class NavidromeManager(
                     name = json.optString("name"),
                     artist = json.optString("albumArtist", json.optString("artist")),
                     artistId = json.optString("albumArtistId", json.optString("artistId")),
-                    coverArtUrl = getCoverArtUrl(json.optString("id")),
+                    coverArtUrl = getCoverArtUrl(json.optString("id"), smallSize),
                     year = json.optInt("maxYear", json.optInt("year")),
                     type = if (json.optBoolean("compilation", false)) "compilation" else "album"
                 )

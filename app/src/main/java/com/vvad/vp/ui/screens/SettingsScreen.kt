@@ -31,6 +31,9 @@ fun SettingsScreen(credentialsManager: CredentialsManager,
     val savedFormat by credentialsManager.preferredFormat.collectAsState(initial = "raw")
     val savedBitrate by credentialsManager.maxBitrate.collectAsState(initial = 0)
 
+    val savedSmallSize by credentialsManager.coverSizeSmall.collectAsState(initial = 400)
+    val savedLargeSize by credentialsManager.coverSizeLarge.collectAsState(initial = 800)
+
     val formats = listOf("raw", "mp3", "ogg", "aac")
     val bitrates = listOf(0, 128, 192, 256, 320)
     // Local UI State
@@ -38,6 +41,9 @@ fun SettingsScreen(credentialsManager: CredentialsManager,
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var useHttps by remember { mutableStateOf(false) }
+
+    var isTesting by remember { mutableStateOf(false) }
+    var testMessage by remember { mutableStateOf("") }
 
     // Load saved settings into fields once when data is available
     LaunchedEffect(savedServer) {
@@ -64,13 +70,57 @@ fun SettingsScreen(credentialsManager: CredentialsManager,
         OutlinedTextField(value = username, onValueChange = { username = it }, label = { Text("Username") }, modifier = Modifier.fillMaxWidth())
         OutlinedTextField(value = password, onValueChange = { password = it }, label = { Text("Password") }, visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
 
+        var isTesting by remember { mutableStateOf(false) }
+        var testMessage by remember { mutableStateOf("") }
+
         Button(
             onClick = {
                 scope.launch {
-                    navidromeManager.testConnection(serverAddress, username, password, useHttps)
-                } },
-            modifier = Modifier.fillMaxWidth()
-        ) { Text("Connect") }
+                    isTesting = true
+                    testMessage = "Testing connection..."
+
+                    val success = navidromeManager.testConnection(
+                        serverAddress.trim(),
+                        username.trim(),
+                        password,
+                        useHttps
+                    )
+
+                    if (success) {
+                        // ← SAVE CREDENTIALS HERE
+                        credentialsManager.saveCredentials(
+                            serverAddress.trim(),
+                            username.trim(),
+                            password,
+                            useHttps
+                        )
+
+                        testMessage = "✅ Connected and credentials saved!"
+                    } else {
+                        testMessage = "❌ Connection failed. Check Logcat."
+                    }
+                    isTesting = false
+                }
+            },
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !isTesting && serverAddress.isNotBlank() && username.isNotBlank()
+        ) {
+            if (isTesting) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Connecting...")
+            } else {
+                Text("Test & Save Connection")
+            }
+        }
+
+        if (testMessage.isNotEmpty()) {
+            Text(
+                text = testMessage,
+                color = if (testMessage.contains("✅")) Color(0xFF4CAF50) else Color.Red,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
 
         // Color-coded status
         val statusColor = if (lastStatus == "Connected") Color(0xFF4CAF50) else Color(0xFFF44336)
@@ -127,6 +177,50 @@ fun SettingsScreen(credentialsManager: CredentialsManager,
                         scope.launch { credentialsManager.saveTranscodingSettings(savedFormat, br) }
                     },
                     label = { Text(if (br == 0) "Unlimited" else br.toString()) }
+                )
+            }
+        }
+
+        HorizontalDivider(modifier = Modifier.padding(vertical = 16.dp))
+        Text("Cover Art Quality", style = MaterialTheme.typography.titleMedium)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Small covers
+        Text("Small covers (Home, grids)", style = MaterialTheme.typography.labelMedium)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(200, 300, 400, 512).forEach { size ->
+                FilterChip(
+                    selected = savedSmallSize == size,
+                    onClick = {
+                        scope.launch {
+                            credentialsManager.saveCoverSizes(size, savedLargeSize)
+                        }
+                    },
+                    label = { Text("$size") }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Large covers
+        Text("Large covers (Player, Album detail)", style = MaterialTheme.typography.labelMedium)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(600, 800, 1024, 1200).forEach { size ->
+                FilterChip(
+                    selected = savedLargeSize == size,
+                    onClick = {
+                        scope.launch {
+                            credentialsManager.saveCoverSizes(savedSmallSize, size)
+                        }
+                    },
+                    label = { Text("$size") }
                 )
             }
         }

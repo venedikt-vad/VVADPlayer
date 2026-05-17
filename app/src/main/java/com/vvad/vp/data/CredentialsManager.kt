@@ -21,7 +21,6 @@ class CredentialsManager(private val context: Context) {
         val PREFERRED_FORMAT = stringPreferencesKey("preferred_format")
         val MAX_BITRATE = intPreferencesKey("max_bitrate")
     }
-
     suspend fun getRawServer(): String = server.first()
     suspend fun getUsername(): String = user.first()
     suspend fun getPassword(): String = pass.first()
@@ -33,17 +32,14 @@ class CredentialsManager(private val context: Context) {
         // Ensure we don't double up on protocol if user entered it
         return if (address.startsWith("http")) address else "$protocol$address"
     }
-
     suspend fun getPreferredFormat(): String = preferredFormat.first()
     suspend fun getMaxBitrate(): Int = maxBitrate.first()
-
     suspend fun saveTranscodingSettings(format: String, bitrate: Int) {
         context.dataStore.edit {
             it[PREFERRED_FORMAT] = format
             it[MAX_BITRATE] = bitrate
         }
     }
-
     suspend fun saveCredentials(server: String, user: String, pass: String, https: Boolean) {
         context.dataStore.edit {
             it[SERVER] = server
@@ -52,11 +48,29 @@ class CredentialsManager(private val context: Context) {
             it[USE_HTTPS] = https
         }
     }
-
     suspend fun updateStatus(status: String) {
         context.dataStore.edit {
             it[LAST_STATUS] = status
             it[LAST_CHECK_TIME] = System.currentTimeMillis()
+        }
+    }
+
+    // Add to companion object
+    val COVER_SIZE_SMALL = intPreferencesKey("cover_size_small")
+    val COVER_SIZE_LARGE = intPreferencesKey("cover_size_large")
+
+    // Add flows
+    val coverSizeSmall: Flow<Int> = context.dataStore.data.map { it[COVER_SIZE_SMALL] ?: 400 }
+    val coverSizeLarge: Flow<Int> = context.dataStore.data.map { it[COVER_SIZE_LARGE] ?: 800 }
+
+    // Add helper
+    suspend fun getCoverSizeSmall(): Int = coverSizeSmall.first()
+    suspend fun getCoverSizeLarge(): Int = coverSizeLarge.first()
+
+    suspend fun saveCoverSizes(small: Int, large: Int) {
+        context.dataStore.edit {
+            it[COVER_SIZE_SMALL] = small.coerceIn(100, 2000)
+            it[COVER_SIZE_LARGE] = large.coerceIn(300, 3000)
         }
     }
 

@@ -9,12 +9,15 @@ import androidx.compose.animation.ExitTransition
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -63,44 +66,56 @@ class MainActivity : ComponentActivity() {
 
                         bottomBar = {
                             Column {
+                                // Glassmorphic / semi-transparent blur effect container
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                    tonalElevation = 16.dp,
+                                    // Optional: Add shadow for depth
+                                    shadowElevation = 8.dp,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column {
+                                        PlayerStripe(
+                                            playbackManager = playbackManager,
+                                            onStripeClick = { isPlayerVisible = true }
+                                        )
 
-                                PlayerStripe(
-                                    playbackManager = playbackManager,
-                                    onStripeClick = { isPlayerVisible = true }
-                                )
+                                        NavigationBar(
+                                            containerColor = Color.Transparent, // Let parent Surface provide glass look
+                                            contentColor = MaterialTheme.colorScheme.onSurface
+                                        ) {
+                                            NavigationBarItem(
+                                                selected = currentRoute == "home",
+                                                onClick = {
+                                                    navController.navigate("home") {
+                                                        popUpTo(navController.graph.startDestinationId)
+                                                        launchSingleTop = true
+                                                    }
+                                                },
+                                                icon = {
+                                                    Icon(Icons.Default.Home, contentDescription = "Home")
+                                                },
+                                                label = {
+                                                    Text("Home")
+                                                }
+                                            )
 
-                                NavigationBar {
-
-                                    NavigationBarItem(
-                                        selected = currentRoute == "home",
-                                        onClick = {
-                                            navController.navigate("home") {
-                                                popUpTo(navController.graph.startDestinationId)
-                                                launchSingleTop = true
-                                            }
-                                        },
-                                        icon = {
-                                            Icon(Icons.Default.Home, contentDescription = "Home")
-                                        },
-                                        label = {
-                                            Text("Home")
+                                            NavigationBarItem(
+                                                selected = currentRoute == "settings",
+                                                onClick = {
+                                                    navController.navigate("settings") {
+                                                        launchSingleTop = true
+                                                    }
+                                                },
+                                                icon = {
+                                                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                                                },
+                                                label = {
+                                                    Text("Settings")
+                                                }
+                                            )
                                         }
-                                    )
-
-                                    NavigationBarItem(
-                                        selected = currentRoute == "settings",
-                                        onClick = {
-                                            navController.navigate("settings") {
-                                                launchSingleTop = true
-                                            }
-                                        },
-                                        icon = {
-                                            Icon(Icons.Default.Settings, contentDescription = "Settings")
-                                        },
-                                        label = {
-                                            Text("Settings")
-                                        }
-                                    )
+                                    }
                                 }
                             }
                         }
