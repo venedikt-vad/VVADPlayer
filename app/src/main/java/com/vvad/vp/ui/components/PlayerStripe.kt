@@ -46,8 +46,8 @@ fun PlayerStripe(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color.Black.copy(alpha = 0.65f),
-                            Color.Black.copy(alpha = 0.92f)
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.34f),
+                            MaterialTheme.colorScheme.surface.copy(alpha = 0.52f)
                         )
                     )
                 )

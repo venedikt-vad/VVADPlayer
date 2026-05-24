@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.vvad.vp.data.NavidromeManager
@@ -42,6 +43,8 @@ import com.vvad.vp.ui.models.Album
 @Composable
 fun SearchScreen(
     navidromeManager: NavidromeManager,
+    topContentPadding: Dp = 0.dp,
+    bottomContentPadding: Dp = 0.dp,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit
 ) {
@@ -80,7 +83,12 @@ fun SearchScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(
+                start = 16.dp,
+                top = topContentPadding + 12.dp,
+                end = 16.dp,
+                bottom = bottomContentPadding + 12.dp
+            )
     ) {
         OutlinedTextField(
             value = query,
@@ -163,6 +171,8 @@ fun SearchScreen(
 @Composable
 fun AlbumsScreen(
     navidromeManager: NavidromeManager,
+    topContentPadding: Dp = 0.dp,
+    bottomContentPadding: Dp = 0.dp,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit
 ) {
@@ -178,7 +188,9 @@ fun AlbumsScreen(
         title = "Albums",
         isLoading = isLoading,
         isEmpty = albums.isEmpty(),
-        emptyText = "No albums found"
+        emptyText = "No albums found",
+        topContentPadding = topContentPadding,
+        bottomContentPadding = bottomContentPadding
     ) {
         items(albums, key = { it.id }) { album ->
             LibraryAlbumRow(
@@ -193,6 +205,8 @@ fun AlbumsScreen(
 @Composable
 fun ArtistsScreen(
     navidromeManager: NavidromeManager,
+    topContentPadding: Dp = 0.dp,
+    bottomContentPadding: Dp = 0.dp,
     onArtistClick: (String) -> Unit
 ) {
     var artists by remember { mutableStateOf<List<Album>>(emptyList()) }
@@ -207,7 +221,9 @@ fun ArtistsScreen(
         title = "Artists",
         isLoading = isLoading,
         isEmpty = artists.isEmpty(),
-        emptyText = "No artists found"
+        emptyText = "No artists found",
+        topContentPadding = topContentPadding,
+        bottomContentPadding = bottomContentPadding
     ) {
         items(artists, key = { it.id }) { artist ->
             LibraryArtistRow(
@@ -224,17 +240,29 @@ private fun LibraryListScreen(
     isLoading: Boolean,
     isEmpty: Boolean,
     emptyText: String,
+    topContentPadding: Dp = 0.dp,
+    bottomContentPadding: Dp = 0.dp,
     content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit
 ) {
     when {
         isLoading -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = topContentPadding, bottom = bottomContentPadding),
+                contentAlignment = Alignment.Center
+            ) {
                 CircularProgressIndicator()
             }
         }
 
         isEmpty -> {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = topContentPadding, bottom = bottomContentPadding),
+                contentAlignment = Alignment.Center
+            ) {
                 Text(
                     text = emptyText,
                     style = MaterialTheme.typography.bodyLarge,
@@ -246,7 +274,12 @@ private fun LibraryListScreen(
         else -> {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    top = topContentPadding + 16.dp,
+                    end = 16.dp,
+                    bottom = bottomContentPadding + 16.dp
+                ),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {

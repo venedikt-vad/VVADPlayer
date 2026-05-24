@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.vvad.vp.data.NavidromeManager
@@ -35,6 +36,8 @@ import com.vvad.vp.ui.models.ArtistDetails
 fun ArtistScreen(
     artistId: String,
     navidromeManager: NavidromeManager,
+    topContentPadding: Dp = 0.dp,
+    bottomContentPadding: Dp = 0.dp,
     onAlbumClick: (String) -> Unit,
     onBackClick: () -> Unit
 ) {
@@ -119,8 +122,8 @@ fun ArtistScreen(
                     columns = GridCells.Fixed(2),
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(
-                        top = paddingValues.calculateTopPadding(),
-                        bottom = 100.dp,
+                        top = topContentPadding + paddingValues.calculateTopPadding(),
+                        bottom = bottomContentPadding + 16.dp,
                         start = 16.dp,
                         end = 16.dp
                     ),

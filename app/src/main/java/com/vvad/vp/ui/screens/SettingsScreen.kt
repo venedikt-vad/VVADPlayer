@@ -9,6 +9,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.vvad.vp.data.CredentialsManager
 import com.vvad.vp.data.NavidromeManager
@@ -16,8 +17,12 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 @Composable
-fun SettingsScreen(credentialsManager: CredentialsManager,
-                   navidromeManager: NavidromeManager) {
+fun SettingsScreen(
+    credentialsManager: CredentialsManager,
+    navidromeManager: NavidromeManager,
+    topContentPadding: Dp = 0.dp,
+    bottomContentPadding: Dp = 0.dp
+) {
     val scope = rememberCoroutineScope()
 
     // Observe persisted values
@@ -54,7 +59,15 @@ fun SettingsScreen(credentialsManager: CredentialsManager,
     }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(24.dp).verticalScroll(rememberScrollState()),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                start = 24.dp,
+                top = topContentPadding + 24.dp,
+                end = 24.dp,
+                bottom = bottomContentPadding + 24.dp
+            )
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {

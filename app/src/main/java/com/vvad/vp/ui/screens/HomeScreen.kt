@@ -26,6 +26,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
@@ -43,6 +44,8 @@ private enum class HomeMode {
 fun HomeScreen(
     navidromeManager: NavidromeManager,
     offlineLibraryManager: OfflineLibraryManager,
+    topContentPadding: Dp = 0.dp,
+    bottomContentPadding: Dp = 0.dp,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit
 ) {
@@ -76,9 +79,13 @@ fun HomeScreen(
     }
 
     LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp),
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(
+            start = 16.dp,
+            top = topContentPadding + 16.dp,
+            end = 16.dp,
+            bottom = bottomContentPadding + 16.dp
+        ),
         verticalArrangement = Arrangement.spacedBy(24.dp)
     ) {
         if (homeMode == HomeMode.Offline) {

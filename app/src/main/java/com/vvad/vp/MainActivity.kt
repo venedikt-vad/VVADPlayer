@@ -23,10 +23,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.media3.common.util.UnstableApi
@@ -68,7 +68,16 @@ class MainActivity : ComponentActivity() {
 
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
+                var topBarHeightPx by remember { mutableIntStateOf(0) }
+                var bottomBarHeightPx by remember { mutableIntStateOf(0) }
+                val density = LocalDensity.current
                 val showTopBar = currentRoute == "home"
+                val topSafePadding = if (showTopBar) {
+                    with(density) { topBarHeightPx.toDp() }
+                } else {
+                    0.dp
+                }
+                val bottomSafePadding = with(density) { bottomBarHeightPx.toDp() }
                 val selectedNavRoute = when {
                     currentRoute == "home" -> "home"
                     currentRoute == "search" -> "search"
@@ -100,7 +109,9 @@ class MainActivity : ComponentActivity() {
                         topBar = {
                             if (showTopBar) {
                                 GlassBarSurface(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onSizeChanged { topBarHeightPx = it.height },
                                     tonalElevation = 2.dp,
                                     shadowElevation = 4.dp
                                 ) {
@@ -138,7 +149,9 @@ class MainActivity : ComponentActivity() {
                         bottomBar = {
                             Column {
                                 GlassBarSurface(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onSizeChanged { bottomBarHeightPx = it.height },
                                     tonalElevation = 16.dp,
                                     shadowElevation = 8.dp
                                 ) {
@@ -209,12 +222,12 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                    ) { padding ->
+                    ) {
 
                         NavHost(
                             navController = navController,
                             startDestination = "home",
-                            modifier = Modifier.padding(padding),
+                            modifier = Modifier.fillMaxSize(),
                             enterTransition = { EnterTransition.None },
                             exitTransition = { ExitTransition.None },
                             popEnterTransition = { EnterTransition.None },
@@ -225,6 +238,8 @@ class MainActivity : ComponentActivity() {
                                 HomeScreen(
                                     navidromeManager = navidromeManager,
                                     offlineLibraryManager = offlineLibraryManager,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding,
                                     onAlbumClick = { albumId ->
                                         navController.navigate("album/$albumId")
                                     },
@@ -237,13 +252,17 @@ class MainActivity : ComponentActivity() {
                             composable("settings") {
                                 SettingsScreen(
                                     credentialsManager,
-                                    navidromeManager
+                                    navidromeManager,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding
                                 )
                             }
 
                             composable("search") {
                                 SearchScreen(
                                     navidromeManager = navidromeManager,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding,
                                     onAlbumClick = { albumId ->
                                         navController.navigate("album/$albumId")
                                     },
@@ -256,6 +275,8 @@ class MainActivity : ComponentActivity() {
                             composable("albums") {
                                 AlbumsScreen(
                                     navidromeManager = navidromeManager,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding,
                                     onAlbumClick = { albumId ->
                                         navController.navigate("album/$albumId")
                                     },
@@ -268,6 +289,8 @@ class MainActivity : ComponentActivity() {
                             composable("artists") {
                                 ArtistsScreen(
                                     navidromeManager = navidromeManager,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding,
                                     onArtistClick = { artistId ->
                                         navController.navigate("artist/$artistId")
                                     }
@@ -283,6 +306,8 @@ class MainActivity : ComponentActivity() {
                                     albumId = albumId,
                                     navidromeManager = navidromeManager,
                                     offlineLibraryManager = offlineLibraryManager,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding,
                                     currentTrackId = playbackManager.currentTrack?.id,
                                     onBack = { navController.popBackStack() },
                                     onArtistClick = { id ->
@@ -319,6 +344,8 @@ class MainActivity : ComponentActivity() {
                                 ArtistScreen(
                                     artistId = artistId,
                                     navidromeManager = navidromeManager,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding,
                                     onAlbumClick = { id ->
                                         navController.navigate("album/$id")
                                     },
@@ -384,32 +411,8 @@ private fun GlassBarSurface(
                 .fillMaxWidth()
                 .height(IntrinsicSize.Min)
                 .clipToBounds()
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.72f))
         ) {
-            // 1. Blurred background (this needs to be first)
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .blur(radius = 28.dp)
-                    .background(
-                        MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)
-                    )
-            )
-
-            // 2. Subtle glass highlight
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            colors = listOf(
-                                Color.White.copy(alpha = 0.22f),
-                                Color.White.copy(alpha = 0.03f)
-                            )
-                        )
-                    )
-            )
-
-            // 3. Content on top
             content()
         }
     }

@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.vvad.vp.data.AlbumOfflineAvailability
@@ -42,6 +43,8 @@ fun AlbumScreen(
     albumId: String?,
     navidromeManager: NavidromeManager,
     offlineLibraryManager: OfflineLibraryManager,
+    topContentPadding: Dp = 0.dp,
+    bottomContentPadding: Dp = 0.dp,
     currentTrackId: String?,
     onBack: () -> Unit,
     onArtistClick: (String) -> Unit,
@@ -98,7 +101,11 @@ fun AlbumScreen(
                 containerColor = Color.Transparent
             ) { padding ->
                 LazyColumn(
-                    modifier = Modifier.padding(padding).fillMaxSize(),
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(
+                        top = topContentPadding + padding.calculateTopPadding(),
+                        bottom = bottomContentPadding + padding.calculateBottomPadding() + 24.dp
+                    ),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     item {
