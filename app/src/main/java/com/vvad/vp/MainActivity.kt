@@ -163,14 +163,27 @@ class MainActivity : ComponentActivity() {
                                     albumId = albumId,
                                     navidromeManager = navidromeManager,
                                     offlineLibraryManager = offlineLibraryManager,
+                                    currentTrackId = playbackManager.currentTrack?.id,
                                     onBack = { navController.popBackStack() },
                                     onArtistClick = { id ->
                                         navController.navigate("artist/$id")
                                     },
-                                    onTrackClick = { track, albumId, albumName, coverUrl ->
-                                        playbackManager.play(
+                                    onCurrentTrackClick = {
+                                        playbackManager.togglePlayPause()
+                                    },
+                                    onTrackClick = { tracks, selectedIndex, selectedAlbumId, albumName, coverUrl ->
+                                        playbackManager.replaceQueue(
+                                            tracks,
+                                            selectedIndex,
+                                            selectedAlbumId,
+                                            albumName,
+                                            coverUrl
+                                        )
+                                    },
+                                    onTrackLongClick = { track, queuedAlbumId, albumName, coverUrl ->
+                                        playbackManager.appendToQueue(
                                             track,
-                                            albumId,
+                                            queuedAlbumId,
                                             albumName,
                                             coverUrl
                                         )

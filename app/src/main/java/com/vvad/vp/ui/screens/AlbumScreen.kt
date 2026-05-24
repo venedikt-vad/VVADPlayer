@@ -5,11 +5,15 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
@@ -33,13 +37,17 @@ import com.vvad.vp.ui.models.Track
 import kotlinx.coroutines.launch
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 fun AlbumScreen(
     albumId: String?,
     navidromeManager: NavidromeManager,
     offlineLibraryManager: OfflineLibraryManager,
+    currentTrackId: String?,
     onBack: () -> Unit,
     onArtistClick: (String) -> Unit,
-    onTrackClick: (Track, String, String, String) -> Unit
+    onCurrentTrackClick: () -> Unit,
+    onTrackClick: (List<Track>, Int, String, String, String) -> Unit,
+    onTrackLongClick: (Track, String, String, String) -> Unit
 ) {
     var album by remember { mutableStateOf<AlbumDetails?>(null) }
     var isDownloadedOffline by remember(albumId) { mutableStateOf(false) }
@@ -48,6 +56,7 @@ fun AlbumScreen(
     var isOfflineMode by remember(albumId) { mutableStateOf(false) }
     var isDownloading by remember(albumId) { mutableStateOf(false) }
     var downloadMessage by remember(albumId) { mutableStateOf<String?>(null) }
+    val flashCounts = remember(albumId) { mutableStateMapOf<String, Int>() }
     val scope = rememberCoroutineScope()
     val isNetworkAvailable by rememberNetworkAvailability()
 
@@ -63,6 +72,10 @@ fun AlbumScreen(
     }
 
     album?.let { details ->
+        val trackIndexById = remember(details.tracks) {
+            details.tracks.mapIndexed { index, track -> track.id to index }.toMap()
+        }
+
         Box(modifier = Modifier.fillMaxSize()) {
             // 1. Blurred Background Image
             AsyncImage(
@@ -215,11 +228,33 @@ fun AlbumScreen(
                             TrackItem(
                                 track = track,
                                 enabled = isTrackEnabled,
-                                onArtistClick = onArtistClick,
+                                isCurrentlyPlaying = track.id == currentTrackId,
+                                flashTrigger = flashCounts[track.id] ?: 0,
                                 modifier = if (isTrackEnabled) {
-                                    Modifier.clickable {
-                                        onTrackClick(track, details.id, details.name, details.coverArtUrl)
-                                    }
+                                    Modifier.combinedClickable(
+                                        onClick = {
+                                            if (track.id == currentTrackId) {
+                                                onCurrentTrackClick()
+                                            } else {
+                                                onTrackClick(
+                                                    details.tracks,
+                                                    trackIndexById[track.id] ?: 0,
+                                                    details.id,
+                                                    details.name,
+                                                    details.coverArtUrl
+                                                )
+                                            }
+                                        },
+                                        onLongClick = {
+                                            flashCounts[track.id] = (flashCounts[track.id] ?: 0) + 1
+                                            onTrackLongClick(
+                                                track,
+                                                details.id,
+                                                details.name,
+                                                details.coverArtUrl
+                                            )
+                                        }
+                                    )
                                 } else {
                                     Modifier
                                 }
@@ -250,16 +285,33 @@ fun AlbumScreen(
 fun TrackItem(
     track: Track,
     enabled: Boolean,
-    onArtistClick: (String) -> Unit,
+    isCurrentlyPlaying: Boolean,
+    flashTrigger: Int = 0,
     modifier: Modifier = Modifier
 ) {
+    val flashAlpha = remember(track.id) { Animatable(0f) }
     val titleColor = if (enabled) Color.White else Color.White.copy(alpha = 0.35f)
     val secondaryColor = if (enabled) Color.White.copy(0.7f) else Color.White.copy(alpha = 0.3f)
     val trailingColor = if (enabled) Color.White.copy(0.5f) else Color.White.copy(alpha = 0.25f)
+    val baseHighlightAlpha = if (isCurrentlyPlaying) 0.1f else 0f
+    val containerColor = Color.White.copy(alpha = (baseHighlightAlpha + flashAlpha.value).coerceAtMost(0.38f))
+
+    LaunchedEffect(track.id, flashTrigger) {
+        if (flashTrigger <= 0) return@LaunchedEffect
+        flashAlpha.snapTo(0f)
+        flashAlpha.animateTo(
+            targetValue = 0.28f,
+            animationSpec = tween(durationMillis = 100)
+        )
+        flashAlpha.animateTo(
+            targetValue = 0f,
+            animationSpec = tween(durationMillis = 280)
+        )
+    }
 
     ListItem(
         modifier = modifier,
-        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+        colors = ListItemDefaults.colors(containerColor = containerColor),
         headlineContent = { Text(track.title, color = titleColor) },
         supportingContent = {
             Row(modifier = Modifier.fillMaxWidth()) {

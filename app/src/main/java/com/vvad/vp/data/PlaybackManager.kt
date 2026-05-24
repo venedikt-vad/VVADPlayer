@@ -3,6 +3,7 @@ package com.vvad.vp.data
 import android.content.Context
 import android.util.Log
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -31,13 +32,25 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     companion object {
         // Keep a generous rewind window in memory so recent backward seeks don't need to rebuffer.
         private const val BACK_BUFFER_MS = 10 * 60 * 1000
+        private const val PREVIOUS_RESTART_THRESHOLD_MS = 5_000L
     }
+
+    data class QueueEntry(
+        val track: Track,
+        val albumId: String,
+        val albumName: String,
+        val coverArtUrl: String
+    )
 
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var playbackJob: Job? = null
     private var hasScrobbled = false
 
+    var queue by mutableStateOf<List<QueueEntry>>(emptyList())
+        private set
+    var currentQueueIndex by mutableIntStateOf(-1)
+        private set
     var currentTrack by mutableStateOf<Track?>(null)
     var currentAlbumId by mutableStateOf<String?>(null)
     var currentAlbumName by mutableStateOf("")
@@ -88,6 +101,9 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
                 }
 
                 override fun onPlaybackStateChanged(state: Int) {
+                    if (state == Player.STATE_ENDED && playNextFromQueue()) {
+                        return
+                    }
                     syncProgress()
                 }
 
@@ -148,21 +164,73 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     }
 
     fun play(track: Track, albumId: String, albumName: String, coverArtUrl: String) {
+        replaceQueue(
+            tracks = listOf(track),
+            startIndex = 0,
+            albumId = albumId,
+            albumName = albumName,
+            coverArtUrl = coverArtUrl
+        )
+    }
+
+    fun replaceQueue(
+        tracks: List<Track>,
+        startIndex: Int,
+        albumId: String,
+        albumName: String,
+        coverArtUrl: String
+    ) {
+        if (tracks.isEmpty()) return
+
+        queue = tracks.map { track ->
+            QueueEntry(
+                track = track,
+                albumId = albumId,
+                albumName = albumName,
+                coverArtUrl = coverArtUrl
+            )
+        }
+
+        playQueueEntry(startIndex.coerceIn(0, queue.lastIndex))
+    }
+
+    fun appendToQueue(track: Track, albumId: String, albumName: String, coverArtUrl: String) {
+        val entry = QueueEntry(
+            track = track,
+            albumId = albumId,
+            albumName = albumName,
+            coverArtUrl = coverArtUrl
+        )
+
+        if (queue.isEmpty() || currentQueueIndex !in queue.indices || currentTrack == null) {
+            queue = listOf(entry)
+            playQueueEntry(0)
+            return
+        }
+
+        queue = queue + entry
+    }
+
+    private fun playQueueEntry(index: Int) {
+        val entry = queue.getOrNull(index) ?: return
+
         playbackJob?.cancel()
         exoPlayer.stop()
         exoPlayer.clearMediaItems()
 
-        currentTrack = track
-        currentAlbumId = albumId
-        currentAlbumName = albumName
-        currentCoverArtUrl = coverArtUrl
+        currentQueueIndex = index
+        currentTrack = entry.track
+        currentAlbumId = entry.albumId
+        currentAlbumName = entry.albumName
+        currentCoverArtUrl = entry.coverArtUrl
         currentPosition = 0L
         bufferedPosition = 0L
-        duration = track.duration.toLong() * 1000L
+        duration = entry.track.duration.toLong() * 1000L
         hasScrobbled = false
 
         playbackJob = scope.launch {
             try {
+                val track = entry.track
                 val streamUrl = navidromeManager.getStreamUrl(track.id)
                 val preferredFormat = navidromeManager.credentialsManager.getPreferredFormat()
                 val preferredBitrate = navidromeManager.credentialsManager.getMaxBitrate()
@@ -213,12 +281,30 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         }
     }
 
-    fun next() { /* Implement next track logic later */ }
-    fun previous() { /* Implement previous track logic later */ }
+    fun next() {
+        playNextFromQueue()
+    }
+
+    fun previous() {
+        if (currentPosition > PREVIOUS_RESTART_THRESHOLD_MS || currentQueueIndex <= 0) {
+            seekTo(0L)
+            return
+        }
+
+        playQueueEntry(currentQueueIndex - 1)
+    }
 
     fun release() {
         playbackJob?.cancel()
         exoPlayer.release()
+    }
+
+    private fun playNextFromQueue(): Boolean {
+        val nextIndex = currentQueueIndex + 1
+        if (nextIndex !in queue.indices) return false
+
+        playQueueEntry(nextIndex)
+        return true
     }
 
     private fun syncProgress() {
