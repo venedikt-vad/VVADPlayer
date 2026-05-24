@@ -6,19 +6,31 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import androidx.media3.common.util.UnstableApi
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
@@ -56,25 +68,79 @@ class MainActivity : ComponentActivity() {
 
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
                 val currentRoute = navBackStackEntry?.destination?.route
+                val showTopBar = currentRoute == "home"
+                val selectedNavRoute = when {
+                    currentRoute == "home" -> "home"
+                    currentRoute == "search" -> "search"
+                    currentRoute == "albums" || currentRoute?.startsWith("album/") == true -> "albums"
+                    currentRoute == "artists" || currentRoute?.startsWith("artist/") == true -> "artists"
+                    else -> null
+                }
+                val navigateToTopLevel: (String) -> Unit = navigate@{ route ->
+                    if (currentRoute == "settings") {
+                        navController.popBackStack()
+                        if (route == "home") {
+                            return@navigate
+                        }
+                    }
+
+                    navController.navigate(route) {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                }
 
                 Box(modifier = Modifier.fillMaxSize()) {
 
                     Scaffold(
+
                         topBar = {
-                            TopAppBar(
-                                title = { Text("VVAD") }
-                            )
+                            if (showTopBar) {
+                                GlassBarSurface(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    tonalElevation = 2.dp,
+                                    shadowElevation = 4.dp
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(36.dp)
+                                            .padding(horizontal = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("VVAD")
+                                        Box(
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clickable {
+                                                    navController.navigate("settings") {
+                                                        launchSingleTop = true
+                                                    }
+                                                },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Settings,
+                                                contentDescription = "Settings"
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         },
 
                         bottomBar = {
                             Column {
-                                // Glassmorphic / semi-transparent blur effect container
-                                Surface(
-                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                GlassBarSurface(
+                                    modifier = Modifier.fillMaxWidth(),
                                     tonalElevation = 16.dp,
-                                    // Optional: Add shadow for depth
-                                    shadowElevation = 8.dp,
-                                    modifier = Modifier.fillMaxWidth()
+                                    shadowElevation = 8.dp
                                 ) {
                                     Column {
                                         PlayerStripe(
@@ -83,16 +149,13 @@ class MainActivity : ComponentActivity() {
                                         )
 
                                         NavigationBar(
-                                            containerColor = Color.Transparent, // Let parent Surface provide glass look
+                                            containerColor = Color.Transparent,
                                             contentColor = MaterialTheme.colorScheme.onSurface
                                         ) {
                                             NavigationBarItem(
-                                                selected = currentRoute == "home",
+                                                selected = selectedNavRoute == "home",
                                                 onClick = {
-                                                    navController.navigate("home") {
-                                                        popUpTo(navController.graph.startDestinationId)
-                                                        launchSingleTop = true
-                                                    }
+                                                    navigateToTopLevel("home")
                                                 },
                                                 icon = {
                                                     Icon(Icons.Default.Home, contentDescription = "Home")
@@ -103,17 +166,41 @@ class MainActivity : ComponentActivity() {
                                             )
 
                                             NavigationBarItem(
-                                                selected = currentRoute == "settings",
+                                                selected = selectedNavRoute == "search",
                                                 onClick = {
-                                                    navController.navigate("settings") {
-                                                        launchSingleTop = true
-                                                    }
+                                                    navigateToTopLevel("search")
                                                 },
                                                 icon = {
-                                                    Icon(Icons.Default.Settings, contentDescription = "Settings")
+                                                    Icon(Icons.Default.Search, contentDescription = "Search")
                                                 },
                                                 label = {
-                                                    Text("Settings")
+                                                    Text("Search")
+                                                }
+                                            )
+
+                                            NavigationBarItem(
+                                                selected = selectedNavRoute == "albums",
+                                                onClick = {
+                                                    navigateToTopLevel("albums")
+                                                },
+                                                icon = {
+                                                    Icon(Icons.Default.Album, contentDescription = "Albums")
+                                                },
+                                                label = {
+                                                    Text("Albums")
+                                                }
+                                            )
+
+                                            NavigationBarItem(
+                                                selected = selectedNavRoute == "artists",
+                                                onClick = {
+                                                    navigateToTopLevel("artists")
+                                                },
+                                                icon = {
+                                                    Icon(Icons.Default.Person, contentDescription = "Artists")
+                                                },
+                                                label = {
+                                                    Text("Artists")
                                                 }
                                             )
                                         }
@@ -151,6 +238,39 @@ class MainActivity : ComponentActivity() {
                                 SettingsScreen(
                                     credentialsManager,
                                     navidromeManager
+                                )
+                            }
+
+                            composable("search") {
+                                SearchScreen(
+                                    navidromeManager = navidromeManager,
+                                    onAlbumClick = { albumId ->
+                                        navController.navigate("album/$albumId")
+                                    },
+                                    onArtistClick = { artistId ->
+                                        navController.navigate("artist/$artistId")
+                                    }
+                                )
+                            }
+
+                            composable("albums") {
+                                AlbumsScreen(
+                                    navidromeManager = navidromeManager,
+                                    onAlbumClick = { albumId ->
+                                        navController.navigate("album/$albumId")
+                                    },
+                                    onArtistClick = { artistId ->
+                                        navController.navigate("artist/$artistId")
+                                    }
+                                )
+                            }
+
+                            composable("artists") {
+                                ArtistsScreen(
+                                    navidromeManager = navidromeManager,
+                                    onArtistClick = { artistId ->
+                                        navController.navigate("artist/$artistId")
+                                    }
                                 )
                             }
 
@@ -242,6 +362,55 @@ class MainActivity : ComponentActivity() {
 
         if (::playbackManager.isInitialized) {
             playbackManager.release()
+        }
+    }
+}
+
+@Composable
+private fun GlassBarSurface(
+    modifier: Modifier = Modifier,
+    tonalElevation: androidx.compose.ui.unit.Dp = 0.dp,
+    shadowElevation: androidx.compose.ui.unit.Dp = 0.dp,
+    content: @Composable () -> Unit
+) {
+    Surface(
+        color = Color.Transparent,
+        tonalElevation = tonalElevation,
+        shadowElevation = shadowElevation,
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(IntrinsicSize.Min)
+                .clipToBounds()
+        ) {
+            // 1. Blurred background (this needs to be first)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .blur(radius = 28.dp)
+                    .background(
+                        MaterialTheme.colorScheme.surface.copy(alpha = 0.75f)
+                    )
+            )
+
+            // 2. Subtle glass highlight
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.White.copy(alpha = 0.22f),
+                                Color.White.copy(alpha = 0.03f)
+                            )
+                        )
+                    )
+            )
+
+            // 3. Content on top
+            content()
         }
     }
 }
