@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
+import coil.request.ImageRequest
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.ui.models.Album
@@ -64,15 +65,8 @@ fun HomeScreen(
                 mostPlayedAlbums = navidromeManager.getMostPlayedAlbums(limit = 8)
                 mostPlayedArtists = navidromeManager.getMostPlayedArtists(limit = 8)
 
-                if (fetchedAlbums.isNotEmpty()) {
-                    randomAlbums = fetchedAlbums
-                    homeMode = HomeMode.Online
-                } else if (offlineAlbums.isNotEmpty()) {
-                    homeMode = HomeMode.Offline
-                } else {
-                    randomAlbums = emptyList()
-                    homeMode = HomeMode.Online
-                }
+                randomAlbums = if (fetchedAlbums.isNotEmpty()) fetchedAlbums else emptyList()
+                homeMode = HomeMode.Online
             } else {
                 homeMode = HomeMode.Offline
             }
@@ -115,7 +109,7 @@ fun HomeScreen(
                     )
                 }
             } else {
-                items(offlineAlbums, key = { it.id }) { album ->
+                items(offlineAlbums, key = { it.id }, contentType = { "album" }) { album ->
                     AlbumTile(
                         album = album,
                         onAlbumClick = { onAlbumClick(album.id) },
@@ -131,7 +125,7 @@ fun HomeScreen(
                 item { Text("Available Offline", style = MaterialTheme.typography.titleLarge) }
                 item {
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        items(offlineAlbums, key = { it.id }) { album ->
+                        items(offlineAlbums, key = { it.id }, contentType = { "album" }) { album ->
                             AlbumTile(
                                 album = album,
                                 onAlbumClick = { onAlbumClick(album.id) },
@@ -168,7 +162,7 @@ private fun LazyListScope.randomAlbumsSection(
     item { Text("Random Albums", style = MaterialTheme.typography.titleLarge) }
     item {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(albums, key = { it.id }) { album ->
+            items(albums, key = { it.id }, contentType = { "album" }) { album ->
                 AlbumTile(
                     album = album,
                     onAlbumClick = { onAlbumClick(album.id) },
@@ -188,7 +182,7 @@ private fun LazyListScope.section(
     item { Text(title, style = MaterialTheme.typography.titleLarge) }
     item {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(albums, key = { it.id }) { album ->
+            items(albums, key = { it.id }, contentType = { "album" }) { album ->
                 AlbumTile(
                     album = album,
                     onAlbumClick = { onAlbumClick(album.id) },
@@ -206,7 +200,7 @@ private fun LazyListScope.artistsSection(
     item { Text("Most Played Artists", style = MaterialTheme.typography.titleLarge) }
     item {
         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-            items(artists, key = { it.id }) { artist ->
+            items(artists, key = { it.id }, contentType = { "artist" }) { artist ->
                 ArtistTile(
                     artist = artist,
                     onClick = { onArtistClick(artist.artistId) }
@@ -216,7 +210,7 @@ private fun LazyListScope.artistsSection(
     }
 }
 
-// ==================== NETWORK AVAILABILITY (Moved Up) ====================
+// ==================== NETWORK AVAILABILITY ====================
 
 @Composable
 private fun rememberNetworkAvailability(): State<Boolean> {
@@ -264,7 +258,7 @@ private fun Context.isNetworkAvailable(): Boolean {
     return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
 }
 
-// ==================== ALBUM TILE (Square) ====================
+// ==================== OPTIMIZED ALBUM TILE ====================
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -276,13 +270,12 @@ fun AlbumTile(
     var imageState by remember { mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Empty) }
 
     val pulseAlpha by rememberInfiniteTransition(label = "pulse").animateFloat(
-        initialValue = 0.65f,
-        targetValue = 0.35f,
+        initialValue = 0.7f,
+        targetValue = 0.4f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = LinearEasing),
+            animation = tween(1800, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseAlpha"
+        )
     )
 
     Column(modifier = Modifier.width(130.dp)) {
@@ -293,7 +286,11 @@ fun AlbumTile(
                 .clickable { onAlbumClick() }
         ) {
             AsyncImage(
-                model = album.coverArtUrl,
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(album.coverArtUrl)
+                    .crossfade(300)
+                    .size(200)
+                    .build(),
                 contentDescription = album.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),
@@ -336,7 +333,7 @@ fun AlbumTile(
     }
 }
 
-// ==================== ARTIST TILE (Circular) ====================
+// ==================== OPTIMIZED ARTIST TILE ====================
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -347,10 +344,10 @@ fun ArtistTile(
     var imageState by remember { mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Empty) }
 
     val pulseAlpha by rememberInfiniteTransition(label = "artist_pulse").animateFloat(
-        initialValue = 0.65f,
-        targetValue = 0.35f,
+        initialValue = 0.7f,
+        targetValue = 0.4f,
         animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = LinearEasing),
+            animation = tween(1800, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
         )
     )
@@ -366,7 +363,11 @@ fun ArtistTile(
                 .clickable { onClick() }
         ) {
             AsyncImage(
-                model = artist.coverArtUrl,
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(artist.coverArtUrl)
+                    .crossfade(300)
+                    .size(200)
+                    .build(),
                 contentDescription = artist.name,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier.fillMaxSize(),

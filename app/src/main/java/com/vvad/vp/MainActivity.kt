@@ -23,6 +23,8 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import coil.ImageLoader
+import coil.request.CachePolicy
 import com.vvad.vp.data.CredentialsManager
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
