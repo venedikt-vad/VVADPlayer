@@ -1,6 +1,7 @@
 package com.vvad.vp.data
 
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -10,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -24,13 +26,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 @UnstableApi
 class PlaybackManager(context: Context, private val navidromeManager: NavidromeManager) {
     companion object {
-        // Keep a generous rewind window in memory so recent backward seeks don't need to rebuffer.
         private const val BACK_BUFFER_MS = 10 * 60 * 1000
         private const val PREVIOUS_RESTART_THRESHOLD_MS = 5_000L
     }
@@ -73,14 +73,12 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         )
         .setLoadControl(
             DefaultLoadControl.Builder()
-                .setBufferDurationsMs(
-                    30000,
-                    50000,
-                    2500,
-                    5000
-                )
+                .setBufferDurationsMs(30000, 50000, 2500, 5000)
                 .setBackBuffer(BACK_BUFFER_MS, true)
                 .build()
+        )
+        .setMediaSourceFactory(
+            ProgressiveMediaSource.Factory(cacheDataSourceFactory, extractorsFactory)
         )
         .build()
         .apply {
@@ -101,13 +99,11 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
                 }
 
                 override fun onPlaybackStateChanged(state: Int) {
-                    if (state == Player.STATE_ENDED && playNextFromQueue()) {
-                        return
-                    }
                     syncProgress()
                 }
 
                 override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                    updateCurrentTrackFromPlayer()
                     syncProgress()
                 }
 
@@ -147,6 +143,19 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         }
     }
 
+    private fun updateCurrentTrackFromPlayer() {
+        val index = exoPlayer.currentMediaItemIndex
+        if (index in queue.indices) {
+            val entry = queue[index]
+            currentQueueIndex = index
+            currentTrack = entry.track
+            currentAlbumId = entry.albumId
+            currentAlbumName = entry.albumName
+            currentCoverArtUrl = entry.coverArtUrl
+            hasScrobbled = false
+        }
+    }
+
     fun seekTo(position: Long) {
         if (exoPlayer.playbackState == Player.STATE_IDLE) return
         if (!exoPlayer.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) return
@@ -182,7 +191,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     ) {
         if (tracks.isEmpty()) return
 
-        queue = tracks.map { track ->
+        val newQueue = tracks.map { track ->
             QueueEntry(
                 track = track,
                 albumId = albumId,
@@ -190,8 +199,23 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
                 coverArtUrl = coverArtUrl
             )
         }
+        queue = newQueue
 
-        playQueueEntry(startIndex.coerceIn(0, queue.lastIndex))
+        playbackJob?.cancel()
+        playbackJob = scope.launch {
+            try {
+                val mediaItems = newQueue.map { entry -> buildMediaItem(entry) }
+
+                exoPlayer.stop()
+                exoPlayer.clearMediaItems()
+                exoPlayer.setMediaItems(mediaItems, startIndex.coerceIn(0, mediaItems.lastIndex), C.TIME_UNSET)
+                exoPlayer.playbackParameters = PlaybackParameters.DEFAULT
+                exoPlayer.playWhenReady = true
+                exoPlayer.prepare()
+            } catch (e: Exception) {
+                Log.e("Playback", "replaceQueue failed", e)
+            }
+        }
     }
 
     fun appendToQueue(track: Track, albumId: String, albumName: String, coverArtUrl: String) {
@@ -203,54 +227,40 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         )
 
         if (queue.isEmpty() || currentQueueIndex !in queue.indices || currentTrack == null) {
-            queue = listOf(entry)
-            playQueueEntry(0)
+            replaceQueue(listOf(track), 0, albumId, albumName, coverArtUrl)
             return
         }
 
         queue = queue + entry
-    }
-
-    private fun playQueueEntry(index: Int) {
-        val entry = queue.getOrNull(index) ?: return
-
-        playbackJob?.cancel()
-        exoPlayer.stop()
-        exoPlayer.clearMediaItems()
-
-        currentQueueIndex = index
-        currentTrack = entry.track
-        currentAlbumId = entry.albumId
-        currentAlbumName = entry.albumName
-        currentCoverArtUrl = entry.coverArtUrl
-        currentPosition = 0L
-        bufferedPosition = 0L
-        duration = entry.track.duration.toLong() * 1000L
-        hasScrobbled = false
-
-        playbackJob = scope.launch {
+        scope.launch {
             try {
-                val track = entry.track
-                val streamUrl = navidromeManager.getStreamUrl(track.id)
-                val preferredFormat = navidromeManager.credentialsManager.getPreferredFormat()
-                val preferredBitrate = navidromeManager.credentialsManager.getMaxBitrate()
-                val mediaItem = MediaItem.Builder()
-                    .setUri(streamUrl)
-                    .setMimeType(preferredFormat.toAudioMimeType())
-                    .setCustomCacheKey(AudioCache.buildTrackCacheKey(track.id, preferredFormat, preferredBitrate))
-                    .build()
-                val mediaSource = ProgressiveMediaSource.Factory(cacheDataSourceFactory, extractorsFactory)
-                    .createMediaSource(mediaItem)
-
-                exoPlayer.setMediaSource(mediaSource)
-                exoPlayer.playbackParameters = PlaybackParameters.DEFAULT
-                exoPlayer.playWhenReady = true
-                exoPlayer.prepare()
-                syncProgress()
+                val mediaItem = buildMediaItem(entry)
+                exoPlayer.addMediaItem(mediaItem)
             } catch (e: Exception) {
-                Log.e("Playback", "Playback failed", e)
+                Log.e("Playback", "appendToQueue failed", e)
             }
         }
+    }
+
+    private suspend fun buildMediaItem(entry: QueueEntry): MediaItem {
+        val track = entry.track
+        val streamUrl = navidromeManager.getStreamUrl(track.id)
+        val preferredFormat = navidromeManager.credentialsManager.getPreferredFormat()
+        val preferredBitrate = navidromeManager.credentialsManager.getMaxBitrate()
+        val metadata = MediaMetadata.Builder()
+            .setTitle(track.title)
+            .setArtist(track.artists.joinToString(", ") { it.name })
+            .apply {
+                if (entry.coverArtUrl.isNotBlank()) setArtworkUri(Uri.parse(entry.coverArtUrl))
+            }
+            .build()
+        return MediaItem.Builder()
+            .setMediaId(track.id)
+            .setUri(streamUrl)
+            .setMimeType(preferredFormat.toAudioMimeType())
+            .setCustomCacheKey(AudioCache.buildTrackCacheKey(track.id, preferredFormat, preferredBitrate))
+            .setMediaMetadata(metadata)
+            .build()
     }
 
     private suspend fun scrobble(trackId: String) {
@@ -282,29 +292,22 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     }
 
     fun next() {
-        playNextFromQueue()
+        if (exoPlayer.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT)) {
+            exoPlayer.seekToNext()
+        }
     }
 
     fun previous() {
         if (currentPosition > PREVIOUS_RESTART_THRESHOLD_MS || currentQueueIndex <= 0) {
-            seekTo(0L)
-            return
+            exoPlayer.seekTo(0)
+        } else if (exoPlayer.isCommandAvailable(Player.COMMAND_SEEK_TO_PREVIOUS)) {
+            exoPlayer.seekToPrevious()
         }
-
-        playQueueEntry(currentQueueIndex - 1)
     }
 
     fun release() {
         playbackJob?.cancel()
         exoPlayer.release()
-    }
-
-    private fun playNextFromQueue(): Boolean {
-        val nextIndex = currentQueueIndex + 1
-        if (nextIndex !in queue.indices) return false
-
-        playQueueEntry(nextIndex)
-        return true
     }
 
     private fun syncProgress() {
