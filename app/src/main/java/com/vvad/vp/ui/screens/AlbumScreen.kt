@@ -9,15 +9,16 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
-import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,7 +39,7 @@ import com.vvad.vp.ui.models.Track
 import kotlinx.coroutines.launch
 
 @Composable
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 fun AlbumScreen(
     albumId: String?,
     navidromeManager: NavidromeManager,
@@ -80,31 +81,37 @@ fun AlbumScreen(
         }
 
         Box(modifier = Modifier.fillMaxSize()) {
-            // 1. Blurred Background Image
             AsyncImage(
                 model = details.coverArtUrl,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .blur(20.dp) // Blur the logo
+                    .blur(20.dp)
             )
 
-            // Dark overlay for readability
-            Box(modifier = Modifier.fillMaxSize().background(
-                Brush.verticalGradient(listOf(Color.Black.copy(0.4f), Color.Black.copy(0.9f)))
-            ))
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(Color.Black.copy(0.4f), Color.Black.copy(0.9f))
+                        )
+                    )
+            )
 
-            // 2. Content
-            @OptIn(ExperimentalMaterial3Api::class)
+            @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
             Scaffold(
                 containerColor = Color.Transparent
             ) { padding ->
                 LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize(),
                     contentPadding = PaddingValues(
                         top = topContentPadding + padding.calculateTopPadding(),
-                        bottom = bottomContentPadding + padding.calculateBottomPadding() + 24.dp
+                        bottom = bottomContentPadding + 0.dp,
+                        start = 0.dp,
+                        end = 0.dp
                     ),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -112,7 +119,10 @@ fun AlbumScreen(
                         AsyncImage(
                             model = details.coverArtUrl,
                             contentDescription = details.name,
-                            modifier = Modifier.fillMaxWidth().aspectRatio(1f).padding(24.dp)
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .aspectRatio(1f)
+                                .padding(24.dp)
                         )
 
                         Text(
@@ -121,36 +131,37 @@ fun AlbumScreen(
                             color = Color.White
                         )
 
-                        Row(
+                        FlowRow(
                             modifier = Modifier
                                 .padding(vertical = 6.dp)
                                 .fillMaxWidth(),
                             horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
                             details.artists.forEachIndexed { index, artist ->
-                                Text(
-                                    text = artist.name,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    color = Color.White.copy(0.8f),
-                                    modifier = Modifier
-                                        .clickable(enabled = artist.id.isNotBlank()) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = artist.name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = Color.White.copy(0.8f),
+                                        modifier = Modifier.clickable(enabled = artist.id.isNotBlank()) {
                                             onArtistClick(artist.id)
                                         }
-                                )
-                                if (index < details.artists.size - 1) {
-                                    Text(
-                                        text = " • ",
-                                        color = Color.White.copy(0.5f),
-                                        style = MaterialTheme.typography.titleMedium
                                     )
+                                    if (index < details.artists.size - 1) {
+                                        Text(
+                                            text = " \u2022 ",
+                                            color = Color.White.copy(0.5f),
+                                            style = MaterialTheme.typography.titleMedium
+                                        )
+                                    }
                                 }
                             }
                         }
 
                         details.year?.takeIf { it != 0 }?.let { year ->
                             Text(
-                                "$year",
+                                text = "$year",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.White.copy(0.5f)
                             )
@@ -167,10 +178,13 @@ fun AlbumScreen(
                                         offlineLibraryManager.downloadAlbumForOffline(details, navidromeManager)
                                     }.onSuccess { result ->
                                         isDownloadedOffline = result.downloadedTracks == result.totalTracks
-                                        downloadMessage = "Saved ${result.downloadedTracks}/${result.totalTracks} tracks offline"
+                                        downloadMessage =
+                                            "Saved ${result.downloadedTracks}/${result.totalTracks} tracks offline"
                                         album = result.album
-                                        offlineAvailability = offlineLibraryManager.getAlbumAvailability(result.album.id)
-                                        cachedTrackIds = offlineLibraryManager.getCachedTrackIds(result.album.id)
+                                        offlineAvailability =
+                                            offlineLibraryManager.getAlbumAvailability(result.album.id)
+                                        cachedTrackIds =
+                                            offlineLibraryManager.getCachedTrackIds(result.album.id)
                                         isOfflineMode = false
                                     }.onFailure {
                                         downloadMessage = it.localizedMessage ?: "Offline download failed"
@@ -186,7 +200,11 @@ fun AlbumScreen(
                                 )
                             } else {
                                 Icon(
-                                    imageVector = if (isDownloadedOffline) Icons.Default.DownloadDone else Icons.Default.Download,
+                                    imageVector = if (isDownloadedOffline) {
+                                        Icons.Default.DownloadDone
+                                    } else {
+                                        Icons.Default.Download
+                                    },
                                     contentDescription = null
                                 )
                             }
@@ -216,14 +234,15 @@ fun AlbumScreen(
                         Spacer(modifier = Modifier.height(24.dp))
                     }
 
-                    // Group tracks by disc number
                     val grouped = details.tracks.groupBy { it.discNumber }
                     grouped.forEach { (disc, tracks) ->
                         if (grouped.size > 1) {
                             item {
                                 Text(
-                                    "Disc $disc",
-                                    modifier = Modifier.fillMaxWidth().padding(16.dp, 8.dp),
+                                    text = "Disc $disc",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(16.dp, 8.dp),
                                     style = MaterialTheme.typography.labelLarge,
                                     color = MaterialTheme.colorScheme.primary
                                 )
@@ -289,6 +308,7 @@ fun AlbumScreen(
 }
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun TrackItem(
     track: Track,
     enabled: Boolean,
@@ -301,7 +321,9 @@ fun TrackItem(
     val secondaryColor = if (enabled) Color.White.copy(0.7f) else Color.White.copy(alpha = 0.3f)
     val trailingColor = if (enabled) Color.White.copy(0.5f) else Color.White.copy(alpha = 0.25f)
     val baseHighlightAlpha = if (isCurrentlyPlaying) 0.1f else 0f
-    val containerColor = Color.White.copy(alpha = (baseHighlightAlpha + flashAlpha.value).coerceAtMost(0.38f))
+    val containerColor = Color.White.copy(
+        alpha = (baseHighlightAlpha + flashAlpha.value).coerceAtMost(0.38f)
+    )
 
     LaunchedEffect(track.id, flashTrigger) {
         if (flashTrigger <= 0) return@LaunchedEffect
@@ -321,16 +343,21 @@ fun TrackItem(
         colors = ListItemDefaults.colors(containerColor = containerColor),
         headlineContent = { Text(track.title, color = titleColor) },
         supportingContent = {
-            Row(modifier = Modifier.fillMaxWidth()) {
+            FlowRow(modifier = Modifier.fillMaxWidth()) {
                 track.artists.forEachIndexed { index, artist ->
-                    Text(
-                        text = artist.name,
-                        color = secondaryColor,
-                        style = MaterialTheme.typography.bodySmall,
-                        modifier = Modifier
-                    )
-                    if (index < track.artists.size - 1) {
-                        Text(", ", color = secondaryColor, style = MaterialTheme.typography.bodySmall)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = artist.name,
+                            color = secondaryColor,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                        if (index < track.artists.size - 1) {
+                            Text(
+                                text = ", ",
+                                color = secondaryColor,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     }
                 }
             }

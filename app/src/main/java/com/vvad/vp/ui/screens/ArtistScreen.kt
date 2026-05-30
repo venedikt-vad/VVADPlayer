@@ -120,7 +120,8 @@ fun ArtistScreen(
 
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize(),
                     contentPadding = PaddingValues(
                         top = topContentPadding + paddingValues.calculateTopPadding(),
                         bottom = bottomContentPadding + 16.dp,

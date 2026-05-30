@@ -1,6 +1,12 @@
 package com.vvad.vp
 
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.ServiceConnection
 import android.os.Bundle
+import android.os.IBinder
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
@@ -17,17 +23,22 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
+import android.graphics.Color
 import androidx.core.view.WindowCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -35,12 +46,17 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.res.painterResource
 import coil.ImageLoader
 import coil.request.CachePolicy
 import com.vvad.vp.data.CredentialsManager
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.data.PlaybackManager
+import com.vvad.vp.data.PlaybackService
 import com.vvad.vp.ui.components.PlayerStripe
 import com.vvad.vp.ui.screens.*
 import com.vvad.vp.ui.theme.VVADPlayerTheme
@@ -48,17 +64,42 @@ import com.vvad.vp.ui.theme.VVADPlayerTheme
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
 
-    private lateinit var playbackManager: PlaybackManager
+    private var playbackManager by mutableStateOf<PlaybackManager?>(null)
+    private var serviceBound = false
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+            val binder = service as PlaybackService.LocalBinder
+            playbackManager = binder.getService().playbackManager
+            serviceBound = true
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            playbackManager = null
+            serviceBound = false
+        }
+    }
 
     @androidx.annotation.OptIn(UnstableApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Force black status & navigation bars
+        window.statusBarColor = android.graphics.Color.BLACK
+        window.navigationBarColor = android.graphics.Color.BLACK
+
+        // Make icons white
+        androidx.core.view.WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
+
         val credentialsManager = CredentialsManager(this)
         val offlineLibraryManager = OfflineLibraryManager(this)
         val navidromeManager = NavidromeManager(credentialsManager, offlineLibraryManager)
 
-        playbackManager = PlaybackManager(this, navidromeManager)
+        val serviceIntent = Intent(this, PlaybackService::class.java)
+        startForegroundService(serviceIntent)
+        bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
 
         setContent {
             VVADPlayerTheme {
@@ -81,16 +122,26 @@ class MainActivity : ComponentActivity() {
                 val selectedNavRoute = when {
                     currentRoute == "home" -> "home"
                     currentRoute == "search" -> "search"
-                    currentRoute == "albums" || currentRoute?.startsWith("album/") == true -> "albums"
-                    currentRoute == "artists" || currentRoute?.startsWith("artist/") == true -> "artists"
+                    currentRoute == "albums" || currentRoute?.startsWith("album") == true -> "albums"
+                    currentRoute == "artists" || currentRoute?.startsWith("artist") == true -> "artists"
                     else -> null
                 }
-                val navigateToTopLevel: (String) -> Unit = navigate@{ route ->
+
+                val navigateToTopLevel: (String) -> Unit = fun(route: String) {
+                    if (currentRoute == route) {
+                        return
+                    }
+
                     if (currentRoute == "settings") {
                         navController.popBackStack()
                         if (route == "home") {
-                            return@navigate
+                            return
                         }
+                    }
+
+                    if (navController.popBackStack(route, inclusive = false)) {
+                        Log.d("NAV", "Popped back from '$currentRoute' to existing '$route'")
+                        return
                     }
 
                     navController.navigate(route) {
@@ -100,6 +151,8 @@ class MainActivity : ComponentActivity() {
                         launchSingleTop = true
                         restoreState = true
                     }
+
+                    Log.d("NAV", "Navigating from '$currentRoute' to '$route'")
                 }
 
                 Box(modifier = Modifier.fillMaxSize()) {
@@ -110,6 +163,7 @@ class MainActivity : ComponentActivity() {
                             if (showTopBar) {
                                 GlassBarSurface(
                                     modifier = Modifier
+                                        .zIndex(1f)
                                         .fillMaxWidth()
                                         .onSizeChanged { topBarHeightPx = it.height },
                                     tonalElevation = 2.dp,
@@ -122,7 +176,16 @@ class MainActivity : ComponentActivity() {
                                             .padding(horizontal = 12.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text("VVAD")
+                                        Image(
+                                            painter = painterResource(id = R.drawable.vp_applogowhite),  // ← your svg name without .svg
+                                            contentDescription = "VVAD Logo",
+                                            modifier = Modifier
+                                                .height(28.dp)           // Adjust size as needed
+                                                .aspectRatio(2.5f)       // Change based on your logo's shape
+                                        )
+
+                                        // Optional: Add spacing if needed
+//                                        Spacer(modifier = Modifier.width(8.dp))
                                         Box(
                                             modifier = Modifier.weight(1f)
                                         )
@@ -150,19 +213,22 @@ class MainActivity : ComponentActivity() {
                             Column {
                                 GlassBarSurface(
                                     modifier = Modifier
+                                        .zIndex(1f)
                                         .fillMaxWidth()
                                         .onSizeChanged { bottomBarHeightPx = it.height },
                                     tonalElevation = 16.dp,
                                     shadowElevation = 8.dp
                                 ) {
                                     Column {
-                                        PlayerStripe(
-                                            playbackManager = playbackManager,
-                                            onStripeClick = { isPlayerVisible = true }
-                                        )
+                                        playbackManager?.let { pm ->
+                                            PlayerStripe(
+                                                playbackManager = pm,
+                                                onStripeClick = { isPlayerVisible = true }
+                                            )
+                                        }
 
                                         NavigationBar(
-                                            containerColor = Color.Transparent,
+                                            containerColor = androidx.compose.ui.graphics.Color.Transparent,
                                             contentColor = MaterialTheme.colorScheme.onSurface
                                         ) {
                                             NavigationBarItem(
@@ -222,12 +288,14 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-                    ) {
+                    ) { innerPadding ->
 
                         NavHost(
                             navController = navController,
                             startDestination = "home",
-                            modifier = Modifier.fillMaxSize(),
+                            modifier = Modifier
+                                .fillMaxSize(),
+//                                .padding(bottom = innerPadding.calculateBottomPadding()),
                             enterTransition = { EnterTransition.None },
                             exitTransition = { ExitTransition.None },
                             popEnterTransition = { EnterTransition.None },
@@ -255,7 +323,8 @@ class MainActivity : ComponentActivity() {
                                     navidromeManager,
                                     topContentPadding = topSafePadding,
                                     bottomContentPadding = bottomSafePadding
-                                )
+
+                                    )
                             }
 
                             composable("search") {
@@ -302,22 +371,23 @@ class MainActivity : ComponentActivity() {
                                 val albumId =
                                     backStackEntry.arguments?.getString("albumId")
 
+                                val pm = playbackManager
                                 AlbumScreen(
                                     albumId = albumId,
                                     navidromeManager = navidromeManager,
                                     offlineLibraryManager = offlineLibraryManager,
                                     topContentPadding = topSafePadding,
                                     bottomContentPadding = bottomSafePadding,
-                                    currentTrackId = playbackManager.currentTrack?.id,
+                                    currentTrackId = pm?.currentTrack?.id,
                                     onBack = { navController.popBackStack() },
                                     onArtistClick = { id ->
                                         navController.navigate("artist/$id")
                                     },
                                     onCurrentTrackClick = {
-                                        playbackManager.togglePlayPause()
+                                        pm?.togglePlayPause()
                                     },
                                     onTrackClick = { tracks, selectedIndex, selectedAlbumId, albumName, coverUrl ->
-                                        playbackManager.replaceQueue(
+                                        pm?.replaceQueue(
                                             tracks,
                                             selectedIndex,
                                             selectedAlbumId,
@@ -326,7 +396,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                     },
                                     onTrackLongClick = { track, queuedAlbumId, albumName, coverUrl ->
-                                        playbackManager.appendToQueue(
+                                        pm?.appendToQueue(
                                             track,
                                             queuedAlbumId,
                                             albumName,
@@ -357,27 +427,29 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
-                    AnimatedVisibility(
-                        visible = isPlayerVisible,
-                        enter = androidx.compose.animation.slideInVertically(
-                            initialOffsetY = { it }
-                        ),
-                        exit = androidx.compose.animation.slideOutVertically(
-                            targetOffsetY = { it }
-                        )
-                    ) {
-                        PlayerScreen(
-                            playbackManager = playbackManager,
-                            onAlbumClick = { albumId ->
-                                isPlayerVisible = false
-                                navController.navigate("album/$albumId")
-                            },
-                            onArtistClick = { artistId ->
-                                isPlayerVisible = false
-                                navController.navigate("artist/$artistId")
-                            },
-                            onClose = { isPlayerVisible = false }
-                        )
+                    playbackManager?.let { pm ->
+                        AnimatedVisibility(
+                            visible = isPlayerVisible,
+                            enter = androidx.compose.animation.slideInVertically(
+                                initialOffsetY = { it }
+                            ),
+                            exit = androidx.compose.animation.slideOutVertically(
+                                targetOffsetY = { it }
+                            )
+                        ) {
+                            PlayerScreen(
+                                playbackManager = pm,
+                                onAlbumClick = { albumId ->
+                                    isPlayerVisible = false
+                                    navController.navigate("album/$albumId")
+                                },
+                                onArtistClick = { artistId ->
+                                    isPlayerVisible = false
+                                    navController.navigate("artist/$artistId")
+                                },
+                                onClose = { isPlayerVisible = false }
+                            )
+                        }
                     }
                 }
             }
@@ -387,8 +459,9 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
 
-        if (::playbackManager.isInitialized) {
-            playbackManager.release()
+        if (serviceBound) {
+            unbindService(serviceConnection)
+            serviceBound = false
         }
     }
 }
@@ -401,7 +474,7 @@ private fun GlassBarSurface(
     content: @Composable () -> Unit
 ) {
     Surface(
-        color = Color.Transparent,
+        color = androidx.compose.ui.graphics.Color.Transparent,
         tonalElevation = tonalElevation,
         shadowElevation = shadowElevation,
         modifier = modifier

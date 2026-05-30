@@ -63,7 +63,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     private val extractorsFactory = AudioCache.buildExtractorsFactory()
     private val cacheDataSourceFactory = AudioCache.buildCacheDataSourceFactory(appContext)
 
-    private val exoPlayer = ExoPlayer.Builder(context)
+    val exoPlayer = ExoPlayer.Builder(context)
         .setAudioAttributes(
             AudioAttributes.Builder()
                 .setUsage(C.USAGE_MEDIA)
