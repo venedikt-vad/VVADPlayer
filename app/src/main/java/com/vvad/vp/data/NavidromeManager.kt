@@ -697,9 +697,43 @@ class NavidromeManager(
         return "u=$user&t=$token&s=$salt&$API_PARAMS"
     }
 
-    private fun generateSalt(): String = (1..6).map {
+    private     fun generateSalt(): String = (1..6).map {
         (('A'..'Z') + ('a'..'z') + ('0'..'9')).random()
     }.joinToString("")
+
+    suspend fun starTrack(trackId: String): Boolean {
+        val baseUrl = credentialsManager.getFullServerUrl()
+        val authParams = buildSubsonicAuthParams()
+        val url = "$baseUrl/rest/star?$authParams&id=$trackId&f=json"
+        val response = executeRequest(url, "GET")
+        return response != null
+    }
+
+    suspend fun unstarTrack(trackId: String): Boolean {
+        val baseUrl = credentialsManager.getFullServerUrl()
+        val authParams = buildSubsonicAuthParams()
+        val url = "$baseUrl/rest/unstar?$authParams&id=$trackId&f=json"
+        val response = executeRequest(url, "GET")
+        return response != null
+    }
+
+    suspend fun getStarredTrackIds(): List<String> = withContext(Dispatchers.IO) {
+        val baseUrl = credentialsManager.getFullServerUrl()
+        val authParams = buildSubsonicAuthParams()
+        val url = "$baseUrl/rest/getStarred2?$authParams&f=json"
+        try {
+            val response = executeRequest(url, "GET") ?: return@withContext emptyList()
+            val json = JSONObject(response)
+            val starred = json.optJSONObject("subsonic-response")?.optJSONObject("starred2")
+            val songs = starred?.optJSONArray("song") ?: return@withContext emptyList()
+            (0 until songs.length()).map { i ->
+                songs.getJSONObject(i).optString("id")
+            }.filter { it.isNotBlank() }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch starred tracks", e)
+            emptyList()
+        }
+    }
 
     // =========================================================================
     // JSON PARSING LOGIC

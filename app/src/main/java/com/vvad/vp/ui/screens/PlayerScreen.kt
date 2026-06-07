@@ -37,7 +37,8 @@ fun PlayerScreen(
     playbackManager: PlaybackManager,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    onQueueClick: () -> Unit = {}
 ) {
     val track = playbackManager.currentTrack ?: return
     val currentAlbumId = playbackManager.currentAlbumId
@@ -147,7 +148,14 @@ fun PlayerScreen(
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth()
+                    .let { base ->
+                        if (!currentAlbumId.isNullOrBlank()) {
+                            base.clickable { onAlbumClick(currentAlbumId) }
+                        } else {
+                            base
+                        }
+                    },
                 textAlign = TextAlign.Center // Centered song name
             )
             Row(
@@ -177,6 +185,32 @@ fun PlayerScreen(
             }
 
             Spacer(modifier = Modifier.weight(1f))
+
+            // Action Buttons (favorite, queue)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = trackHorizontalInset),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = {
+                    playbackManager.toggleFavorite()
+                }) {
+                    Icon(
+                        imageVector = if (playbackManager.isCurrentTrackFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                        contentDescription = "Favorite",
+                        tint = if (playbackManager.isCurrentTrackFavorite) VVADRed else Color.White.copy(alpha = 0.7f)
+                    )
+                }
+                IconButton(onClick = { onQueueClick() }) {
+                    Icon(
+                        imageVector = Icons.Default.QueueMusic,
+                        contentDescription = "Queue",
+                        tint = Color.White.copy(alpha = 0.7f)
+                    )
+                }
+            }
 
             // Progress Bar
             Column(modifier = Modifier.fillMaxWidth()) {

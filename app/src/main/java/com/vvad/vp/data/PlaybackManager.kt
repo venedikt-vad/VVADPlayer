@@ -60,6 +60,10 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     var bufferedPosition by mutableLongStateOf(0L)
     var duration by mutableLongStateOf(0L)
 
+    private val favoriteTrackIds = mutableSetOf<String>()
+    var isCurrentTrackFavorite by mutableStateOf(false)
+        private set
+
     private val extractorsFactory = AudioCache.buildExtractorsFactory()
     private val cacheDataSourceFactory = AudioCache.buildCacheDataSourceFactory(appContext)
 
@@ -126,6 +130,11 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         syncProgress()
 
         scope.launch {
+            val starredIds = navidromeManager.getStarredTrackIds()
+            favoriteTrackIds.addAll(starredIds)
+        }
+
+        scope.launch {
             while (true) {
                 syncProgress()
 
@@ -153,6 +162,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
             currentAlbumName = entry.albumName
             currentCoverArtUrl = entry.coverArtUrl
             hasScrobbled = false
+            isCurrentTrackFavorite = entry.track.id in favoriteTrackIds
         }
     }
 
@@ -283,6 +293,25 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         }
     }
 
+    fun toggleFavorite() {
+        val track = currentTrack ?: return
+        scope.launch {
+            if (track.id in favoriteTrackIds) {
+                val success = navidromeManager.unstarTrack(track.id)
+                if (success) {
+                    favoriteTrackIds.remove(track.id)
+                    isCurrentTrackFavorite = false
+                }
+            } else {
+                val success = navidromeManager.starTrack(track.id)
+                if (success) {
+                    favoriteTrackIds.add(track.id)
+                    isCurrentTrackFavorite = true
+                }
+            }
+        }
+    }
+
     fun togglePlayPause() {
         if (exoPlayer.isPlaying) {
             exoPlayer.pause()
@@ -294,6 +323,55 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     fun next() {
         if (exoPlayer.isCommandAvailable(Player.COMMAND_SEEK_TO_NEXT)) {
             exoPlayer.seekToNext()
+        }
+    }
+
+    fun seekToQueueIndex(index: Int) {
+        if (index in queue.indices) {
+            exoPlayer.seekToDefaultPosition(index)
+        }
+    }
+
+    fun removeFromQueue(trackId: String) {
+        val index = queue.indexOfFirst { it.track.id == trackId }
+        if (index == -1) return
+        if (queue.size <= 1) return
+        scope.launch {
+            val newQueue = queue.toMutableList()
+            newQueue.removeAt(index)
+            val newIndex = when {
+                index < currentQueueIndex -> currentQueueIndex - 1
+                index == currentQueueIndex -> currentQueueIndex.coerceAtMost(newQueue.lastIndex)
+                else -> currentQueueIndex
+            }
+            queue = newQueue
+            currentQueueIndex = newIndex
+            currentTrack = newQueue.getOrNull(newIndex)?.track
+            currentAlbumId = newQueue.getOrNull(newIndex)?.albumId
+            currentAlbumName = newQueue.getOrNull(newIndex)?.albumName ?: ""
+            currentCoverArtUrl = newQueue.getOrNull(newIndex)?.coverArtUrl ?: ""
+            if (exoPlayer.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
+                exoPlayer.removeMediaItem(index)
+            }
+        }
+    }
+
+    fun clearQueueExceptCurrent() {
+        if (queue.size <= 1) return
+        val currentEntry = queue.getOrNull(currentQueueIndex) ?: return
+        scope.launch {
+            queue = listOf(currentEntry)
+            currentQueueIndex = 0
+            currentTrack = currentEntry.track
+            currentAlbumId = currentEntry.albumId
+            currentAlbumName = currentEntry.albumName
+            currentCoverArtUrl = currentEntry.coverArtUrl
+            exoPlayer.stop()
+            exoPlayer.clearMediaItems()
+            val mediaItem = buildMediaItem(currentEntry)
+            exoPlayer.setMediaItems(listOf(mediaItem), 0, C.TIME_UNSET)
+            exoPlayer.playWhenReady = true
+            exoPlayer.prepare()
         }
     }
 

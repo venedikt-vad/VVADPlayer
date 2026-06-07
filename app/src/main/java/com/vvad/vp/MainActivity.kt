@@ -424,6 +424,16 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                             }
+
+                            composable("queue") {
+                                playbackManager?.let { pm ->
+                                    QueueScreen(
+                                        playbackManager = pm,
+                                        onBack = { navController.popBackStack() },
+                                        bottomContentPadding = bottomSafePadding
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -447,7 +457,11 @@ class MainActivity : ComponentActivity() {
                                     isPlayerVisible = false
                                     navController.navigate("artist/$artistId")
                                 },
-                                onClose = { isPlayerVisible = false }
+                                onClose = { isPlayerVisible = false },
+                                onQueueClick = {
+                                    isPlayerVisible = false
+                                    navController.navigate("queue")
+                                }
                             )
                         }
                     }
