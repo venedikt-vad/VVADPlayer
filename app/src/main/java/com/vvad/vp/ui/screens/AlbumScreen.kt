@@ -66,12 +66,25 @@ fun AlbumScreen(
 
     LaunchedEffect(albumId, isNetworkAvailable) {
         if (albumId != null) {
-            val result = navidromeManager.getAlbum(albumId)
-            album = result.album
-            isDownloadedOffline = offlineLibraryManager.isAlbumDownloaded(albumId)
-            offlineAvailability = offlineLibraryManager.getAlbumAvailability(albumId)
-            cachedTrackIds = offlineLibraryManager.getCachedTrackIds(albumId)
-            isOfflineMode = !isNetworkAvailable || result.fromOfflineCache
+            val cachedAlbum = offlineLibraryManager.getCachedAlbum(albumId)
+            if (cachedAlbum != null) {
+                album = cachedAlbum
+                isDownloadedOffline = offlineLibraryManager.isAlbumDownloaded(albumId)
+                offlineAvailability = offlineLibraryManager.getAlbumAvailability(albumId)
+                cachedTrackIds = offlineLibraryManager.getCachedTrackIds(albumId)
+                isOfflineMode = !isNetworkAvailable
+            }
+
+            if (isNetworkAvailable) {
+                val result = navidromeManager.getAlbum(albumId)
+                result.album?.let { freshAlbum ->
+                    album = freshAlbum
+                    isDownloadedOffline = offlineLibraryManager.isAlbumDownloaded(albumId)
+                    offlineAvailability = offlineLibraryManager.getAlbumAvailability(albumId)
+                    cachedTrackIds = offlineLibraryManager.getCachedTrackIds(albumId)
+                    isOfflineMode = result.fromOfflineCache
+                }
+            }
         }
     }
 
@@ -115,6 +128,81 @@ fun AlbumScreen(
                     ),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            downloadMessage?.let { message ->
+                                Text(
+                                    text = message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.75f)
+                                )
+                            } ?: offlineAvailability?.takeIf { it.cachedTrackCount > 0 }?.let { availability ->
+                                Text(
+                                    text = if (availability.downloadedForOffline) {
+                                        "All ${availability.totalTrackCount} tracks available offline"
+                                    } else {
+                                        "${availability.cachedTrackCount}/${availability.totalTrackCount} cached"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.White.copy(alpha = 0.75f)
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.width(8.dp))
+
+                            FilledTonalButton(
+                                onClick = {
+                                    if (isDownloading) return@FilledTonalButton
+                                    scope.launch {
+                                        isDownloading = true
+                                        downloadMessage = null
+                                        runCatching {
+                                            offlineLibraryManager.downloadAlbumForOffline(details, navidromeManager)
+                                        }.onSuccess { result ->
+                                            isDownloadedOffline = result.downloadedTracks == result.totalTracks
+                                            downloadMessage =
+                                                "Saved ${result.downloadedTracks}/${result.totalTracks} tracks offline"
+                                            album = result.album
+                                            offlineAvailability =
+                                                offlineLibraryManager.getAlbumAvailability(result.album.id)
+                                            cachedTrackIds =
+                                                offlineLibraryManager.getCachedTrackIds(result.album.id)
+                                            isOfflineMode = false
+                                        }.onFailure {
+                                            downloadMessage = it.localizedMessage ?: "Offline download failed"
+                                        }
+                                        isDownloading = false
+                                    }
+                                },
+                                contentPadding = PaddingValues(8.dp),
+                                modifier = Modifier.sizeIn(minWidth = 36.dp, minHeight = 36.dp)
+                            ) {
+                                if (isDownloading) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(18.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                } else {
+                                    Icon(
+                                imageVector = if (cachedTrackIds.size >= details.tracks.size && details.tracks.isNotEmpty()) {
+                                        Icons.Default.DownloadDone
+                                    } else {
+                                        Icons.Default.Download
+                                    },
+                                        contentDescription = if (isDownloadedOffline) "Available Offline" else "Download Offline",
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     item {
                         AsyncImage(
                             model = details.coverArtUrl,
@@ -166,72 +254,7 @@ fun AlbumScreen(
                                 color = Color.White.copy(0.5f)
                             )
                         }
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        FilledTonalButton(
-                            onClick = {
-                                if (isDownloading) return@FilledTonalButton
-                                scope.launch {
-                                    isDownloading = true
-                                    downloadMessage = null
-                                    runCatching {
-                                        offlineLibraryManager.downloadAlbumForOffline(details, navidromeManager)
-                                    }.onSuccess { result ->
-                                        isDownloadedOffline = result.downloadedTracks == result.totalTracks
-                                        downloadMessage =
-                                            "Saved ${result.downloadedTracks}/${result.totalTracks} tracks offline"
-                                        album = result.album
-                                        offlineAvailability =
-                                            offlineLibraryManager.getAlbumAvailability(result.album.id)
-                                        cachedTrackIds =
-                                            offlineLibraryManager.getCachedTrackIds(result.album.id)
-                                        isOfflineMode = false
-                                    }.onFailure {
-                                        downloadMessage = it.localizedMessage ?: "Offline download failed"
-                                    }
-                                    isDownloading = false
-                                }
-                            }
-                        ) {
-                            if (isDownloading) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(18.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(
-                                    imageVector = if (isDownloadedOffline) {
-                                        Icons.Default.DownloadDone
-                                    } else {
-                                        Icons.Default.Download
-                                    },
-                                    contentDescription = null
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(if (isDownloadedOffline) "Available Offline" else "Download Offline")
-                        }
-
-                        downloadMessage?.let { message ->
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = message,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.75f)
-                            )
-                        } ?: offlineAvailability?.takeIf { it.cachedTrackCount > 0 }?.let { availability ->
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = if (availability.downloadedForOffline) {
-                                    "All ${availability.totalTrackCount} tracks are available offline"
-                                } else {
-                                    "${availability.cachedTrackCount}/${availability.totalTrackCount} tracks are currently cached offline"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.White.copy(alpha = 0.75f)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(24.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
 
                     val grouped = details.tracks.groupBy { it.discNumber }

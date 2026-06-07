@@ -26,6 +26,7 @@ import androidx.activity.compose.BackHandler
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
 import com.vvad.vp.data.PlaybackManager
+import com.vvad.vp.ui.theme.VVADRed
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -191,8 +192,8 @@ fun PlayerScreen(
                             .fillMaxWidth()
                             .padding(horizontal = trackHorizontalInset)
                             .height(4.dp),
-                        color = Color.White.copy(alpha = 0.35f),
-                        trackColor = Color.White.copy(alpha = 0.14f)
+                        color = VVADRed.copy(alpha = 0.35f),
+                        trackColor = VVADRed.copy(alpha = 0.14f)
                     )
                     Slider(
                         value = sliderPosition.coerceIn(0f, sliderRangeMax),
@@ -207,8 +208,8 @@ fun PlayerScreen(
                         modifier = Modifier.fillMaxWidth(),
                         valueRange = 0f..sliderRangeMax,
                         colors = SliderDefaults.colors(
-                            thumbColor = Color.White,
-                            activeTrackColor = Color.White,
+                            thumbColor = VVADRed,
+                            activeTrackColor = VVADRed,
                             inactiveTrackColor = Color.Transparent
                         )
                     )
