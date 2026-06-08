@@ -376,6 +376,7 @@ class MainActivity : ComponentActivity() {
                                     albumId = albumId,
                                     navidromeManager = navidromeManager,
                                     offlineLibraryManager = offlineLibraryManager,
+                                    playbackManager = pm,
                                     topContentPadding = topSafePadding,
                                     bottomContentPadding = bottomSafePadding,
                                     currentTrackId = pm?.currentTrack?.id,

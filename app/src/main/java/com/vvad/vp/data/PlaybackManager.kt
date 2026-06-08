@@ -63,6 +63,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     private val favoriteTrackIds = mutableSetOf<String>()
     var isCurrentTrackFavorite by mutableStateOf(false)
         private set
+    fun isTrackFavorite(trackId: String): Boolean = trackId in favoriteTrackIds
 
     private val extractorsFactory = AudioCache.buildExtractorsFactory()
     private val cacheDataSourceFactory = AudioCache.buildCacheDataSourceFactory(appContext)
@@ -294,19 +295,22 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     }
 
     fun toggleFavorite() {
-        val track = currentTrack ?: return
+        toggleFavorite(currentTrack ?: return)
+    }
+
+    fun toggleFavorite(track: Track) {
         scope.launch {
             if (track.id in favoriteTrackIds) {
                 val success = navidromeManager.unstarTrack(track.id)
                 if (success) {
                     favoriteTrackIds.remove(track.id)
-                    isCurrentTrackFavorite = false
+                    if (track.id == currentTrack?.id) isCurrentTrackFavorite = false
                 }
             } else {
                 val success = navidromeManager.starTrack(track.id)
                 if (success) {
                     favoriteTrackIds.add(track.id)
-                    isCurrentTrackFavorite = true
+                    if (track.id == currentTrack?.id) isCurrentTrackFavorite = true
                 }
             }
         }

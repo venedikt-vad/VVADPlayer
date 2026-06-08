@@ -19,6 +19,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,6 +36,7 @@ import coil.compose.AsyncImage
 import com.vvad.vp.data.AlbumOfflineAvailability
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
+import com.vvad.vp.data.PlaybackManager
 import com.vvad.vp.ui.models.AlbumDetails
 import com.vvad.vp.ui.models.Track
 import kotlinx.coroutines.launch
@@ -44,6 +47,7 @@ fun AlbumScreen(
     albumId: String?,
     navidromeManager: NavidromeManager,
     offlineLibraryManager: OfflineLibraryManager,
+    playbackManager: PlaybackManager?,
     topContentPadding: Dp = 0.dp,
     bottomContentPadding: Dp = 0.dp,
     currentTrackId: String?,
@@ -279,6 +283,7 @@ fun AlbumScreen(
                                 enabled = isTrackEnabled,
                                 isCurrentlyPlaying = track.id == currentTrackId,
                                 flashTrigger = flashCounts[track.id] ?: 0,
+                                playbackManager = playbackManager,
                                 modifier = if (isTrackEnabled) {
                                     Modifier.combinedClickable(
                                         onClick = {
@@ -337,7 +342,8 @@ fun TrackItem(
     enabled: Boolean,
     isCurrentlyPlaying: Boolean,
     flashTrigger: Int = 0,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    playbackManager: PlaybackManager? = null
 ) {
     val flashAlpha = remember(track.id) { Animatable(0f) }
     val titleColor = if (enabled) Color.White else Color.White.copy(alpha = 0.35f)
@@ -394,9 +400,25 @@ fun TrackItem(
             )
         },
         trailingContent = {
-            val mins = track.duration / 60
-            val secs = track.duration % 60
-            Text("%d:%02d".format(mins, secs), color = trailingColor)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (playbackManager != null) {
+                    val isFav = playbackManager.isTrackFavorite(track.id)
+                    IconButton(
+                        onClick = { playbackManager.toggleFavorite(track) },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = if (isFav) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+                            contentDescription = if (isFav) "Unfavorite" else "Favorite",
+                            tint = if (isFav) Color(0xFFE53935) else trailingColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                val mins = track.duration / 60
+                val secs = track.duration % 60
+                Text("%d:%02d".format(mins, secs), color = trailingColor)
+            }
         }
     )
 }
