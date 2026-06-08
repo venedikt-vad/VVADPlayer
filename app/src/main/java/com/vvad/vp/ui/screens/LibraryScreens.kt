@@ -7,22 +7,39 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -34,11 +51,31 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import android.content.Context
 import coil.compose.AsyncImage
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.ui.models.Album
+
+private enum class AlbumSortOption(val label: String) {
+    NAME("Name"),
+    RECENTLY_PLAYED("Recently played"),
+    MOST_PLAYED("Most played"),
+    RELEASE_YEAR("Release year"),
+    RECENTLY_ADDED("Recently added"),
+    SONG_COUNT("Song count"),
+    DURATION("Duration")
+}
+
+private enum class ArtistSortOption(val label: String) {
+    MOST_PLAYED("Most played"),
+    SONG_COUNT("Song count"),
+    ALBUMS_COUNT("Albums count"),
+    NAME("Name")
+}
 
 @Composable
 fun SearchScreen(
@@ -55,7 +92,7 @@ fun SearchScreen(
 
     LaunchedEffect(Unit) {
         albums = navidromeManager.getAlbums()
-        artists = navidromeManager.getArtists()
+        artists = navidromeManager.getArtists(limit = 10000)
         isLoading = false
     }
 
@@ -74,9 +111,14 @@ fun SearchScreen(
         if (trimmedQuery.isBlank()) {
             emptyList()
         } else {
-            artists.filter { artist ->
+            val matched = artists.filter { artist ->
                 artist.name.contains(trimmedQuery, ignoreCase = true)
-            }.take(30)
+            }
+            val nonComma = matched.filter { !it.name.contains(',') }
+            val comma = matched.filter { it.name.contains(',') }
+            val topPlayed = nonComma.sortedByDescending { it.playCount ?: 0 }.take(10)
+            val restNonComma = nonComma.filter { it !in topPlayed }
+            topPlayed + restNonComma.sortedBy { it.name } + comma.sortedBy { it.name }
         }
     }
 
@@ -142,11 +184,15 @@ fun SearchScreen(
                         item {
                             SectionTitle("Artists")
                         }
-                        items(filteredArtists, key = { "artist-${it.id}" }) { artist ->
-                            LibraryArtistRow(
-                                artist = artist,
-                                onClick = { onArtistClick(artist.artistId) }
-                            )
+                        item {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                items(filteredArtists, key = { "artist-${it.id}" }) { artist ->
+                                    ArtistTile(
+                                        artist = artist,
+                                        onClick = { onArtistClick(artist.artistId) }
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -176,28 +222,124 @@ fun AlbumsScreen(
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("library_prefs", Context.MODE_PRIVATE) }
+
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var sortOption by remember {
+        mutableStateOf(
+            try { AlbumSortOption.valueOf(prefs.getString("album_sort", "NAME") ?: "NAME") }
+            catch (_: Exception) { AlbumSortOption.NAME }
+        )
+    }
+    var ascending by remember { mutableStateOf(prefs.getBoolean("album_ascending", true)) }
+    var isGrid by remember { mutableStateOf(prefs.getBoolean("album_grid", false)) }
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
 
     LaunchedEffect(Unit) {
         albums = navidromeManager.getAlbums()
         isLoading = false
     }
 
-    LibraryListScreen(
-        title = "Albums",
-        isLoading = isLoading,
-        isEmpty = albums.isEmpty(),
-        emptyText = "No albums found",
-        topContentPadding = topContentPadding,
-        bottomContentPadding = bottomContentPadding
-    ) {
-        items(albums, key = { it.id }) { album ->
-            LibraryAlbumRow(
-                album = album,
-                onAlbumClick = { onAlbumClick(album.id) },
-                onArtistClick = { onArtistClick(album.artistId) }
+    LaunchedEffect(sortOption, ascending) {
+        if (isGrid) gridState.animateScrollToItem(0)
+        else listState.animateScrollToItem(0)
+    }
+
+    LaunchedEffect(sortOption, ascending, isGrid) {
+        prefs.edit()
+            .putString("album_sort", sortOption.name)
+            .putBoolean("album_ascending", ascending)
+            .putBoolean("album_grid", isGrid)
+            .apply()
+    }
+
+    val sortedAlbums = remember(albums, sortOption, ascending) {
+        sortAlbums(albums, sortOption, ascending)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                start = 16.dp,
+                top = topContentPadding + 12.dp,
+                end = 16.dp,
+                bottom = bottomContentPadding + 12.dp
             )
+    ) {
+        when {
+            isLoading -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+
+            sortedAlbums.isEmpty() -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "No albums found",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            else -> {
+                SectionTitle("Albums")
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                SortBar(
+                    sortLabel = sortOption.label,
+                    sortOptions = AlbumSortOption.entries.map { it.label },
+                    onSortSelected = { index ->
+                        sortOption = AlbumSortOption.entries[index]
+                    },
+                    ascending = ascending,
+                    onToggleAscending = { ascending = !ascending },
+                    isGrid = isGrid,
+                    onToggleLayout = { isGrid = !isGrid }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (isGrid) {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(160.dp),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(sortedAlbums, key = { it.id }) { album ->
+                            LibraryAlbumGridTile(
+                                album = album,
+                                onAlbumClick = { onAlbumClick(album.id) },
+                                onArtistClick = { onArtistClick(album.artistId) }
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(sortedAlbums, key = { it.id }) { album ->
+                            LibraryAlbumRow(
+                                album = album,
+                                onAlbumClick = { onAlbumClick(album.id) },
+                                onArtistClick = { onArtistClick(album.artistId) }
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -209,85 +351,295 @@ fun ArtistsScreen(
     bottomContentPadding: Dp = 0.dp,
     onArtistClick: (String) -> Unit
 ) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("library_prefs", Context.MODE_PRIVATE) }
+
     var artists by remember { mutableStateOf<List<Album>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var sortOption by remember {
+        mutableStateOf(
+            try { ArtistSortOption.valueOf(prefs.getString("artist_sort", "NAME") ?: "NAME") }
+            catch (_: Exception) { ArtistSortOption.NAME }
+        )
+    }
+    var ascending by remember { mutableStateOf(prefs.getBoolean("artist_ascending", true)) }
+    var isGrid by remember { mutableStateOf(prefs.getBoolean("artist_grid", false)) }
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
 
     LaunchedEffect(Unit) {
         artists = navidromeManager.getArtists()
         isLoading = false
     }
 
-    LibraryListScreen(
-        title = "Artists",
-        isLoading = isLoading,
-        isEmpty = artists.isEmpty(),
-        emptyText = "No artists found",
-        topContentPadding = topContentPadding,
-        bottomContentPadding = bottomContentPadding
-    ) {
-        items(artists, key = { it.id }) { artist ->
-            LibraryArtistRow(
-                artist = artist,
-                onClick = { onArtistClick(artist.artistId) }
+    LaunchedEffect(sortOption, ascending) {
+        if (isGrid) gridState.animateScrollToItem(0)
+        else listState.animateScrollToItem(0)
+    }
+
+    LaunchedEffect(sortOption, ascending, isGrid) {
+        prefs.edit()
+            .putString("artist_sort", sortOption.name)
+            .putBoolean("artist_ascending", ascending)
+            .putBoolean("artist_grid", isGrid)
+            .apply()
+    }
+
+    val sortedArtists = remember(artists, sortOption, ascending) {
+        sortArtists(artists, sortOption, ascending)
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                start = 16.dp,
+                top = topContentPadding + 12.dp,
+                end = 16.dp,
+                bottom = bottomContentPadding + 12.dp
             )
+    ) {
+        when {
+            isLoading -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+
+            sortedArtists.isEmpty() -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "No artists found",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            else -> {
+                SectionTitle("Artists")
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                SortBar(
+                    sortLabel = sortOption.label,
+                    sortOptions = ArtistSortOption.entries.map { it.label },
+                    onSortSelected = { index ->
+                        sortOption = ArtistSortOption.entries[index]
+                    },
+                    ascending = ascending,
+                    onToggleAscending = { ascending = !ascending },
+                    isGrid = isGrid,
+                    onToggleLayout = { isGrid = !isGrid }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (isGrid) {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(120.dp),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(sortedArtists, key = { it.id }) { artist ->
+                            LibraryArtistGridTile(
+                                artist = artist,
+                                onClick = { onArtistClick(artist.artistId) }
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(sortedArtists, key = { it.id }) { artist ->
+                            LibraryArtistRow(
+                                artist = artist,
+                                onClick = { onArtistClick(artist.artistId) }
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
+// ==================== SORTING HELPERS ====================
+
+private fun sortAlbums(albums: List<Album>, option: AlbumSortOption, ascending: Boolean): List<Album> {
+    val comparator: Comparator<Album> = when (option) {
+        AlbumSortOption.NAME -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }
+        AlbumSortOption.RECENTLY_PLAYED -> compareBy<Album> { it.playDate ?: "" }
+        AlbumSortOption.MOST_PLAYED -> compareBy<Album> { it.playCount ?: Int.MIN_VALUE }
+        AlbumSortOption.RELEASE_YEAR -> compareBy<Album> { it.year ?: Int.MIN_VALUE }
+        AlbumSortOption.RECENTLY_ADDED -> compareBy<Album> { it.createdAt ?: "" }
+        AlbumSortOption.SONG_COUNT -> compareBy<Album> { it.songCount ?: Int.MIN_VALUE }
+        AlbumSortOption.DURATION -> compareBy<Album> { it.duration ?: Int.MIN_VALUE }
+    }
+    return if (ascending) albums.sortedWith(comparator) else albums.sortedWith(comparator.reversed())
+}
+
+private fun sortArtists(artists: List<Album>, option: ArtistSortOption, ascending: Boolean): List<Album> {
+    val comparator: Comparator<Album> = when (option) {
+        ArtistSortOption.NAME -> compareBy(String.CASE_INSENSITIVE_ORDER) { it.name }
+        ArtistSortOption.MOST_PLAYED -> compareBy<Album> { it.playCount ?: Int.MIN_VALUE }
+        ArtistSortOption.SONG_COUNT -> compareBy<Album> { it.songCount ?: Int.MIN_VALUE }
+        ArtistSortOption.ALBUMS_COUNT -> compareBy<Album> { it.albumCount ?: Int.MIN_VALUE }
+    }
+    return if (ascending) artists.sortedWith(comparator) else artists.sortedWith(comparator.reversed())
+}
+
+// ==================== SORT BAR ====================
+
 @Composable
-private fun LibraryListScreen(
-    title: String,
-    isLoading: Boolean,
-    isEmpty: Boolean,
-    emptyText: String,
-    topContentPadding: Dp = 0.dp,
-    bottomContentPadding: Dp = 0.dp,
-    content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit
+private fun SortBar(
+    sortLabel: String,
+    sortOptions: List<String>,
+    onSortSelected: (Int) -> Unit,
+    ascending: Boolean,
+    onToggleAscending: () -> Unit,
+    isGrid: Boolean,
+    onToggleLayout: () -> Unit
 ) {
-    when {
-        isLoading -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = topContentPadding, bottom = bottomContentPadding),
-                contentAlignment = Alignment.Center
+    var expanded by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box {
+            TextButton(onClick = { expanded = true }) {
+                Text("Sort: $sortLabel")
+                Icon(
+                    Icons.Default.ArrowDropDown,
+                    contentDescription = "Sort options",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
             ) {
-                CircularProgressIndicator()
+                sortOptions.forEachIndexed { index, option ->
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = option,
+                                fontWeight = if (option == sortLabel) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        onClick = {
+                            onSortSelected(index)
+                            expanded = false
+                        }
+                    )
+                }
             }
         }
 
-        isEmpty -> {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = topContentPadding, bottom = bottomContentPadding),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = emptyText,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+        Row {
+            IconButton(onClick = onToggleAscending) {
+                Icon(
+                    imageVector = if (ascending) Icons.Default.ArrowUpward else Icons.Default.ArrowDownward,
+                    contentDescription = if (ascending) "Ascending" else "Descending"
+                )
+            }
+            IconButton(onClick = onToggleLayout) {
+                Icon(
+                    imageVector = if (isGrid) Icons.AutoMirrored.Filled.ViewList else Icons.Default.GridView,
+                    contentDescription = if (isGrid) "List view" else "Grid view"
                 )
             }
         }
+    }
+}
 
-        else -> {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 16.dp,
-                    top = topContentPadding + 16.dp,
-                    end = 16.dp,
-                    bottom = bottomContentPadding + 16.dp
-                ),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                item {
-                    SectionTitle(title)
+// ==================== GRID TILES ====================
+
+@Composable
+private fun LibraryAlbumGridTile(
+    album: Album,
+    onAlbumClick: () -> Unit,
+    onArtistClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        AsyncImage(
+            model = album.coverArtUrl,
+            contentDescription = album.name,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { onAlbumClick() },
+            contentScale = ContentScale.Crop
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = album.name,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Text(
+            text = buildString {
+                append(album.artist)
+                album.year?.let {
+                    append(" • ")
+                    append(it)
                 }
-                content()
-            }
-        }
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.clickable { onArtistClick() }
+        )
+    }
+}
+
+@Composable
+private fun LibraryArtistGridTile(
+    artist: Album,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        AsyncImage(
+            model = artist.coverArtUrl,
+            contentDescription = artist.name,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+                .clip(CircleShape)
+                .clickable { onClick() },
+            contentScale = ContentScale.Crop
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = artist.name,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }
 

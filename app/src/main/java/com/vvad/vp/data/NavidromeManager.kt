@@ -300,8 +300,13 @@ class NavidromeManager(
                     artist = json.optString("albumArtist", json.optString("artist")),
                     artistId = json.optString("albumArtistId", json.optString("artist_id")),
                     coverArtUrl = getCoverArtUrl(json.optString("id"), smallSize),
-                    year = json.optInt("maxYear", json.optInt("year")),
-                    type = "album"
+                    year = json.optInt("maxYear", json.optInt("year")).takeIf { it > 0 },
+                    type = "album",
+                    playCount = json.optInt("playCount").takeIf { it > 0 },
+                    playDate = json.optString("playDate").takeIf { it.isNotEmpty() },
+                    songCount = json.optInt("songCount").takeIf { it > 0 },
+                    duration = json.optInt("duration").takeIf { it > 0 },
+                    createdAt = json.optString("createdAt").takeIf { it.isNotEmpty() }
                 )
             )
         }
@@ -325,7 +330,10 @@ class NavidromeManager(
                     artistId = id,
                     coverArtUrl = getCoverArtUrl(id, smallSize),
                     year = null,
-                    type = "artist"
+                    type = "artist",
+                    playCount = json.optInt("playCount").takeIf { it > 0 },
+                    songCount = json.optInt("songCount").takeIf { it > 0 },
+                    albumCount = json.optInt("albumCount").takeIf { it > 0 }
                 )
             )
         }

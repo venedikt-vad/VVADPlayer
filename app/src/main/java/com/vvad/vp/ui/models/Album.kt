@@ -7,7 +7,13 @@ data class Album(
     val artistId: String,
     val coverArtUrl: String,
     val year: Int? = null,
-    val type: String? = null
+    val type: String? = null,
+    val playCount: Int? = null,
+    val playDate: String? = null,
+    val songCount: Int? = null,
+    val duration: Int? = null,
+    val createdAt: String? = null,
+    val albumCount: Int? = null
 )
 
 data class AlbumDetails(
