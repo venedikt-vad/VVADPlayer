@@ -83,6 +83,19 @@ class OfflineLibraryManager(context: Context) {
             }
         }
 
+    suspend fun removeFromCache(albumId: String) = withContext(Dispatchers.IO) {
+        albumFile(albumId).delete()
+        File(coversDir, "$albumId.jpg").delete()
+    }
+
+    suspend fun clearAlbumAudioCache(details: AlbumDetails) = withContext(Dispatchers.IO) {
+        val cache = AudioCache.getCache(appContext)
+        details.tracks.forEach { track ->
+            val keysToRemove = cache.getKeys().filter { it.startsWith("track:${track.id}:") }
+            keysToRemove.forEach { key -> cache.removeResource(key) }
+        }
+    }
+
     suspend fun getCachedTrackIds(albumId: String): Set<String> = withContext(Dispatchers.IO) {
         readAlbumRecord(albumId)?.details
             ?.tracks

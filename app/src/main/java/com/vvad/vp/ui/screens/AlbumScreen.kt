@@ -9,6 +9,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
@@ -64,6 +66,7 @@ fun AlbumScreen(
     var isOfflineMode by remember(albumId) { mutableStateOf(false) }
     var isDownloading by remember(albumId) { mutableStateOf(false) }
     var downloadMessage by remember(albumId) { mutableStateOf<String?>(null) }
+    var showCacheMenu by remember(albumId) { mutableStateOf(false) }
     val flashCounts = remember(albumId) { mutableStateMapOf<String, Int>() }
     val scope = rememberCoroutineScope()
     val isNetworkAvailable by rememberNetworkAvailability()
@@ -160,47 +163,116 @@ fun AlbumScreen(
 
                             Spacer(modifier = Modifier.width(8.dp))
 
-                            FilledTonalButton(
-                                onClick = {
-                                    if (isDownloading) return@FilledTonalButton
-                                    scope.launch {
-                                        isDownloading = true
-                                        downloadMessage = null
-                                        runCatching {
-                                            offlineLibraryManager.downloadAlbumForOffline(details, navidromeManager)
-                                        }.onSuccess { result ->
-                                            isDownloadedOffline = result.downloadedTracks == result.totalTracks
-                                            downloadMessage =
-                                                "Saved ${result.downloadedTracks}/${result.totalTracks} tracks offline"
-                                            album = result.album
-                                            offlineAvailability =
-                                                offlineLibraryManager.getAlbumAvailability(result.album.id)
-                                            cachedTrackIds =
-                                                offlineLibraryManager.getCachedTrackIds(result.album.id)
-                                            isOfflineMode = false
-                                        }.onFailure {
-                                            downloadMessage = it.localizedMessage ?: "Offline download failed"
+                            Box {
+                                FilledTonalButton(
+                                    onClick = {
+                                        if (isDownloading) return@FilledTonalButton
+                                        scope.launch {
+                                            isDownloading = true
+                                            downloadMessage = null
+                                            runCatching {
+                                                offlineLibraryManager.downloadAlbumForOffline(details, navidromeManager)
+                                            }.onSuccess { result ->
+                                                isDownloadedOffline = result.downloadedTracks == result.totalTracks
+                                                downloadMessage =
+                                                    "Saved ${result.downloadedTracks}/${result.totalTracks} tracks offline"
+                                                album = result.album
+                                                offlineAvailability =
+                                                    offlineLibraryManager.getAlbumAvailability(result.album.id)
+                                                cachedTrackIds =
+                                                    offlineLibraryManager.getCachedTrackIds(result.album.id)
+                                                isOfflineMode = false
+                                            }.onFailure {
+                                                downloadMessage = it.localizedMessage ?: "Offline download failed"
+                                            }
+                                            isDownloading = false
                                         }
-                                        isDownloading = false
-                                    }
-                                },
-                                contentPadding = PaddingValues(8.dp),
-                                modifier = Modifier.sizeIn(minWidth = 36.dp, minHeight = 36.dp)
-                            ) {
-                                if (isDownloading) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(18.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                } else {
-                                    Icon(
-                                imageVector = if (cachedTrackIds.size >= details.tracks.size && details.tracks.isNotEmpty()) {
-                                        Icons.Default.DownloadDone
-                                    } else {
-                                        Icons.Default.Download
                                     },
-                                        contentDescription = if (isDownloadedOffline) "Available Offline" else "Download Offline",
-                                        modifier = Modifier.size(18.dp)
+                                    contentPadding = PaddingValues(8.dp),
+                                    modifier = Modifier.sizeIn(minWidth = 36.dp, minHeight = 36.dp)
+                                ) {
+                                    if (isDownloading) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(18.dp),
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Icon(
+                                        imageVector = if (cachedTrackIds.size >= details.tracks.size && details.tracks.isNotEmpty()) {
+                                            Icons.Default.DownloadDone
+                                        } else {
+                                            Icons.Default.Download
+                                        },
+                                            contentDescription = if (isDownloadedOffline) "Available Offline" else "Download Offline",
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .matchParentSize()
+                                        .pointerInput(Unit) {
+                                            detectTapGestures(
+                                                onLongPress = { showCacheMenu = true }
+                                            )
+                                        }
+                                )
+
+                                DropdownMenu(
+                                    expanded = showCacheMenu,
+                                    onDismissRequest = { showCacheMenu = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Recache") },
+                                        onClick = {
+                                            showCacheMenu = false
+                                            scope.launch {
+                                                isDownloading = true
+                                                downloadMessage = null
+                                                offlineLibraryManager.removeFromCache(details.id)
+                                                offlineLibraryManager.clearAlbumAudioCache(details)
+                                                runCatching {
+                                                    val result = navidromeManager.getAlbum(details.id)
+                                                    result.album
+                                                }.onSuccess { freshAlbum ->
+                                                    if (freshAlbum != null) {
+                                                        val dlResult = offlineLibraryManager.downloadAlbumForOffline(freshAlbum, navidromeManager)
+                                                        isDownloadedOffline = dlResult.downloadedTracks == dlResult.totalTracks
+                                                        downloadMessage = "Recached ${dlResult.downloadedTracks}/${dlResult.totalTracks} tracks"
+                                                        album = dlResult.album
+                                                        offlineAvailability = offlineLibraryManager.getAlbumAvailability(dlResult.album.id)
+                                                        cachedTrackIds = offlineLibraryManager.getCachedTrackIds(dlResult.album.id)
+                                                        isOfflineMode = false
+                                                    } else {
+                                                        downloadMessage = "Failed to fetch album"
+                                                    }
+                                                }.onFailure {
+                                                    downloadMessage = it.localizedMessage ?: "Recache failed"
+                                                }
+                                                isDownloading = false
+                                            }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Remove from cache") },
+                                        onClick = {
+                                            showCacheMenu = false
+                                            scope.launch {
+                                                offlineLibraryManager.removeFromCache(details.id)
+                                                isDownloadedOffline = false
+                                                offlineAvailability = null
+                                                cachedTrackIds = emptySet()
+                                                if (isNetworkAvailable) {
+                                                    val result = navidromeManager.getAlbum(details.id)
+                                                    result.album?.let { freshAlbum ->
+                                                        album = freshAlbum
+                                                        isOfflineMode = result.fromOfflineCache
+                                                    }
+                                                }
+                                                downloadMessage = "Removed from cache"
+                                            }
+                                        }
                                     )
                                 }
                             }
