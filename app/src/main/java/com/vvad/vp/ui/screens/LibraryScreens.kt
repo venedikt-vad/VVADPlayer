@@ -46,6 +46,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -88,34 +89,33 @@ fun SearchScreen(
     var query by remember { mutableStateOf("") }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var artists by remember { mutableStateOf<List<Album>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+    var isLoading by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
-        albums = navidromeManager.getAlbums()
-        artists = navidromeManager.getArtists(limit = 10000)
+    LaunchedEffect(query) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) {
+            albums = emptyList()
+            artists = emptyList()
+            isLoading = false
+            return@LaunchedEffect
+        }
+        isLoading = true
+        delay(300)
+        albums = navidromeManager.searchAlbums(trimmed)
+        artists = navidromeManager.searchArtists(trimmed)
         isLoading = false
     }
 
     val trimmedQuery = query.trim()
     val filteredAlbums = remember(trimmedQuery, albums) {
-        if (trimmedQuery.isBlank()) {
-            emptyList()
-        } else {
-            albums.filter { album ->
-                album.name.contains(trimmedQuery, ignoreCase = true) ||
-                    album.artist.contains(trimmedQuery, ignoreCase = true)
-            }.take(30)
-        }
+        if (trimmedQuery.isBlank()) emptyList() else albums
     }
     val filteredArtists = remember(trimmedQuery, artists) {
         if (trimmedQuery.isBlank()) {
             emptyList()
         } else {
-            val matched = artists.filter { artist ->
-                artist.name.contains(trimmedQuery, ignoreCase = true)
-            }
-            val nonComma = matched.filter { !it.name.contains(',') }
-            val comma = matched.filter { it.name.contains(',') }
+            val nonComma = artists.filter { !it.name.contains(',') }
+            val comma = artists.filter { it.name.contains(',') }
             val topPlayed = nonComma.sortedByDescending { it.playCount ?: 0 }.take(10)
             val restNonComma = nonComma.filter { it !in topPlayed }
             topPlayed + restNonComma.sortedBy { it.name } + comma.sortedBy { it.name }
@@ -238,12 +238,13 @@ fun AlbumsScreen(
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
 
-    LaunchedEffect(Unit) {
-        albums = navidromeManager.getAlbums()
-        isLoading = false
-    }
-
     LaunchedEffect(sortOption, ascending) {
+        isLoading = true
+        albums = navidromeManager.getAlbums(
+            sort = sortOption.toServerSort(),
+            order = if (ascending) "ASC" else "DESC"
+        )
+        isLoading = false
         if (isGrid) gridState.animateScrollToItem(0)
         else listState.animateScrollToItem(0)
     }
@@ -254,10 +255,6 @@ fun AlbumsScreen(
             .putBoolean("album_ascending", ascending)
             .putBoolean("album_grid", isGrid)
             .apply()
-    }
-
-    val sortedAlbums = remember(albums, sortOption, ascending) {
-        sortAlbums(albums, sortOption, ascending)
     }
 
     Column(
@@ -277,7 +274,7 @@ fun AlbumsScreen(
                 }
             }
 
-            sortedAlbums.isEmpty() -> {
+            albums.isEmpty() -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         text = "No albums found",
@@ -315,7 +312,7 @@ fun AlbumsScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(sortedAlbums, key = { it.id }) { album ->
+                        items(albums, key = { it.id }) { album ->
                             LibraryAlbumGridTile(
                                 album = album,
                                 onAlbumClick = { onAlbumClick(album.id) },
@@ -330,7 +327,7 @@ fun AlbumsScreen(
                         contentPadding = PaddingValues(bottom = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(sortedAlbums, key = { it.id }) { album ->
+                        items(albums, key = { it.id }) { album ->
                             LibraryAlbumRow(
                                 album = album,
                                 onAlbumClick = { onAlbumClick(album.id) },
@@ -367,12 +364,13 @@ fun ArtistsScreen(
     val listState = rememberLazyListState()
     val gridState = rememberLazyGridState()
 
-    LaunchedEffect(Unit) {
-        artists = navidromeManager.getArtists()
-        isLoading = false
-    }
-
     LaunchedEffect(sortOption, ascending) {
+        isLoading = true
+        artists = navidromeManager.getArtists(
+            sort = sortOption.toServerSort(),
+            order = if (ascending) "ASC" else "DESC"
+        )
+        isLoading = false
         if (isGrid) gridState.animateScrollToItem(0)
         else listState.animateScrollToItem(0)
     }
@@ -383,10 +381,6 @@ fun ArtistsScreen(
             .putBoolean("artist_ascending", ascending)
             .putBoolean("artist_grid", isGrid)
             .apply()
-    }
-
-    val sortedArtists = remember(artists, sortOption, ascending) {
-        sortArtists(artists, sortOption, ascending)
     }
 
     Column(
@@ -406,7 +400,7 @@ fun ArtistsScreen(
                 }
             }
 
-            sortedArtists.isEmpty() -> {
+            artists.isEmpty() -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         text = "No artists found",
@@ -444,7 +438,7 @@ fun ArtistsScreen(
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        items(sortedArtists, key = { it.id }) { artist ->
+                        items(artists, key = { it.id }) { artist ->
                             LibraryArtistGridTile(
                                 artist = artist,
                                 onClick = { onArtistClick(artist.artistId) }
@@ -458,7 +452,7 @@ fun ArtistsScreen(
                         contentPadding = PaddingValues(bottom = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(sortedArtists, key = { it.id }) { artist ->
+                        items(artists, key = { it.id }) { artist ->
                             LibraryArtistRow(
                                 artist = artist,
                                 onClick = { onArtistClick(artist.artistId) }
@@ -469,6 +463,25 @@ fun ArtistsScreen(
             }
         }
     }
+}
+
+// ==================== SORT FIELD MAPPINGS ====================
+
+private fun AlbumSortOption.toServerSort(): String = when (this) {
+    AlbumSortOption.NAME -> "name"
+    AlbumSortOption.RECENTLY_PLAYED -> "play_date"
+    AlbumSortOption.MOST_PLAYED -> "play_count"
+    AlbumSortOption.RELEASE_YEAR -> "max_year"
+    AlbumSortOption.RECENTLY_ADDED -> "recently_added"
+    AlbumSortOption.SONG_COUNT -> "song_count"
+    AlbumSortOption.DURATION -> "duration"
+}
+
+private fun ArtistSortOption.toServerSort(): String = when (this) {
+    ArtistSortOption.NAME -> "name"
+    ArtistSortOption.MOST_PLAYED -> "play_count"
+    ArtistSortOption.SONG_COUNT -> "song_count"
+    ArtistSortOption.ALBUMS_COUNT -> "album_count"
 }
 
 // ==================== SORTING HELPERS ====================

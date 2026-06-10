@@ -12,6 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.UUID
 
 class NavidromeManager(
@@ -238,7 +239,7 @@ class NavidromeManager(
         return@withContext emptyList()
     }
 
-    suspend fun getAlbums(limit: Int = 500): List<Album> = withContext(Dispatchers.IO) {
+    suspend fun getAlbums(limit: Int = 500, sort: String = "name", order: String = "ASC"): List<Album> = withContext(Dispatchers.IO) {
         if (!ensureNativeAuth()) {
             Log.e(TAG, "Native authentication failed while fetching albums.")
             return@withContext emptyList()
@@ -246,7 +247,8 @@ class NavidromeManager(
 
         val baseUrl = credentialsManager.getFullServerUrl()
         try {
-            val url = URL("$baseUrl/api/album?_sort=name&_order=ASC&_end=$limit")
+            val encodedSort = URLEncoder.encode(sort, "UTF-8")
+            val url = URL("$baseUrl/api/album?_sort=$encodedSort&_order=$order&_end=$limit")
             val urlConnection = url.openConnection() as HttpURLConnection
             urlConnection.requestMethod = "GET"
             urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
@@ -262,7 +264,7 @@ class NavidromeManager(
         return@withContext emptyList()
     }
 
-    suspend fun getArtists(limit: Int = 500): List<Album> = withContext(Dispatchers.IO) {
+    suspend fun getArtists(limit: Int = 500, sort: String = "name", order: String = "ASC"): List<Album> = withContext(Dispatchers.IO) {
         if (!ensureNativeAuth()) {
             Log.e(TAG, "Native authentication failed while fetching artists.")
             return@withContext emptyList()
@@ -270,7 +272,8 @@ class NavidromeManager(
 
         val baseUrl = credentialsManager.getFullServerUrl()
         try {
-            val url = URL("$baseUrl/api/artist?_sort=name&_order=ASC&_end=$limit")
+            val encodedSort = URLEncoder.encode(sort, "UTF-8")
+            val url = URL("$baseUrl/api/artist?_sort=$encodedSort&_order=$order&_end=$limit")
             val urlConnection = url.openConnection() as HttpURLConnection
             urlConnection.requestMethod = "GET"
             urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
@@ -282,6 +285,58 @@ class NavidromeManager(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during artists fetch", e)
+        }
+        return@withContext emptyList()
+    }
+
+    suspend fun searchAlbums(query: String, limit: Int = 30): List<Album> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        if (!ensureNativeAuth()) {
+            Log.e(TAG, "Native authentication failed while searching albums.")
+            return@withContext emptyList()
+        }
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        try {
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            val url = URL("$baseUrl/api/album?name=$encodedQuery&_order=ASC&_end=$limit")
+            val urlConnection = url.openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "GET"
+            urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
+            urlConnection.setRequestProperty("x-nd-client-unique-id", nativeClientId)
+
+            if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
+                val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
+                return@withContext parseAlbumList(JSONArray(rawJson))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception during album search", e)
+        }
+        return@withContext emptyList()
+    }
+
+    suspend fun searchArtists(query: String, limit: Int = 10): List<Album> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        if (!ensureNativeAuth()) {
+            Log.e(TAG, "Native authentication failed while searching artists.")
+            return@withContext emptyList()
+        }
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        try {
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            val url = URL("$baseUrl/api/artist?name=$encodedQuery&_order=ASC&_end=$limit")
+            val urlConnection = url.openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "GET"
+            urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
+            urlConnection.setRequestProperty("x-nd-client-unique-id", nativeClientId)
+
+            if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
+                val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
+                return@withContext parseArtistList(JSONArray(rawJson))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception during artist search", e)
         }
         return@withContext emptyList()
     }
