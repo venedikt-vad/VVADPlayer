@@ -53,6 +53,8 @@ import androidx.compose.ui.res.painterResource
 import coil.ImageLoader
 import coil.request.CachePolicy
 import com.vvad.vp.data.CredentialsManager
+import com.vvad.vp.data.DownloadManager
+import com.vvad.vp.data.DownloadService
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.data.PlaybackManager
@@ -96,6 +98,7 @@ class MainActivity : ComponentActivity() {
         val credentialsManager = CredentialsManager(this)
         val offlineLibraryManager = OfflineLibraryManager(this)
         val navidromeManager = NavidromeManager(credentialsManager, offlineLibraryManager)
+        DownloadManager.init(offlineLibraryManager, navidromeManager)
 
         val serviceIntent = Intent(this, PlaybackService::class.java)
         startForegroundService(serviceIntent)

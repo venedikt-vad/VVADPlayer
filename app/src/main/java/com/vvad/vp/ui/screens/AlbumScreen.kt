@@ -1,10 +1,13 @@
 package com.vvad.vp.ui.screens
 
 import android.content.Context
+import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.os.Build
+import android.app.NotificationManager
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,6 +38,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.vvad.vp.data.AlbumOfflineAvailability
+import com.vvad.vp.data.DownloadAction
+import com.vvad.vp.data.DownloadJobState
+import com.vvad.vp.data.DownloadManager
+import com.vvad.vp.data.DownloadService
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.data.PlaybackManager
@@ -63,12 +70,33 @@ fun AlbumScreen(
     var offlineAvailability by remember(albumId) { mutableStateOf<AlbumOfflineAvailability?>(null) }
     var cachedTrackIds by remember(albumId) { mutableStateOf<Set<String>>(emptySet()) }
     var isOfflineMode by remember(albumId) { mutableStateOf(false) }
-    var isDownloading by remember(albumId) { mutableStateOf(false) }
     var downloadMessage by remember(albumId) { mutableStateOf<String?>(null) }
     var showCacheMenu by remember(albumId) { mutableStateOf(false) }
     val flashCounts = remember(albumId) { mutableStateMapOf<String, Int>() }
     val scope = rememberCoroutineScope()
     val isNetworkAvailable by rememberNetworkAvailability()
+    val context = LocalContext.current
+    val queueState by DownloadManager.queueState.collectAsState()
+    val isDownloading = queueState.activeJob?.albumId == albumId || queueState.queue.any { it.albumId == albumId }
+
+    LaunchedEffect(albumId) {
+        DownloadManager.queueState.collect { state ->
+            val job = state.activeJob?.takeIf { it.albumId == albumId } ?: return@collect
+            when (val s = job.state) {
+                is DownloadJobState.Completed -> {
+                    if (albumId != null) {
+                        isDownloadedOffline = offlineLibraryManager.isAlbumDownloaded(albumId)
+                        offlineAvailability = offlineLibraryManager.getAlbumAvailability(albumId)
+                        cachedTrackIds = offlineLibraryManager.getCachedTrackIds(albumId)
+                        downloadMessage = "Download complete"
+                    }
+                }
+                is DownloadJobState.Failed -> downloadMessage = s.error
+                is DownloadJobState.Cancelled -> downloadMessage = "Download cancelled"
+                else -> {}
+            }
+        }
+    }
 
     LaunchedEffect(albumId, isNetworkAvailable) {
         if (albumId != null) {
@@ -173,22 +201,18 @@ fun AlbumScreen(
                                                 when {
                                                     isDownloading -> {}
                                                     isFullyCached -> showCacheMenu = true
-                                                    else -> scope.launch {
-                                                        isDownloading = true
-                                                        downloadMessage = null
-                                                        runCatching {
-                                                            offlineLibraryManager.downloadAlbumForOffline(details, navidromeManager)
-                                                        }.onSuccess { result ->
-                                                            isDownloadedOffline = result.downloadedTracks == result.totalTracks
-                                                            downloadMessage = "Saved ${result.downloadedTracks}/${result.totalTracks} tracks offline"
-                                                            album = result.album
-                                                            offlineAvailability = offlineLibraryManager.getAlbumAvailability(result.album.id)
-                                                            cachedTrackIds = offlineLibraryManager.getCachedTrackIds(result.album.id)
-                                                            isOfflineMode = false
-                                                        }.onFailure {
-                                                            downloadMessage = it.localizedMessage ?: "Offline download failed"
+                                                    else -> {
+                                                        DownloadManager.enqueue(details.id, details.name, DownloadAction.DOWNLOAD)
+                                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                                            val nm = context.getSystemService(NotificationManager::class.java)
+                                                            if (nm.areNotificationsEnabled()) {
+                                                                context.startForegroundService(Intent(context, DownloadService::class.java))
+                                                            } else {
+                                                                downloadMessage = "Enable notifications to see download progress"
+                                                            }
+                                                        } else {
+                                                            context.startForegroundService(Intent(context, DownloadService::class.java))
                                                         }
-                                                        isDownloading = false
                                                     }
                                                 }
                                             },
@@ -226,30 +250,16 @@ fun AlbumScreen(
                                     text = { Text("Recache") },
                                     onClick = {
                                         showCacheMenu = false
-                                        scope.launch {
-                                            isDownloading = true
-                                            downloadMessage = null
-                                            offlineLibraryManager.removeFromCache(details.id)
-                                            offlineLibraryManager.clearAlbumAudioCache(details)
-                                            runCatching {
-                                                val result = navidromeManager.getAlbum(details.id)
-                                                result.album
-                                            }.onSuccess { freshAlbum ->
-                                                if (freshAlbum != null) {
-                                                    val dlResult = offlineLibraryManager.downloadAlbumForOffline(freshAlbum, navidromeManager)
-                                                    isDownloadedOffline = dlResult.downloadedTracks == dlResult.totalTracks
-                                                    downloadMessage = "Recached ${dlResult.downloadedTracks}/${dlResult.totalTracks} tracks"
-                                                    album = dlResult.album
-                                                    offlineAvailability = offlineLibraryManager.getAlbumAvailability(dlResult.album.id)
-                                                    cachedTrackIds = offlineLibraryManager.getCachedTrackIds(dlResult.album.id)
-                                                    isOfflineMode = false
-                                                } else {
-                                                    downloadMessage = "Failed to fetch album"
-                                                }
-                                            }.onFailure {
-                                                downloadMessage = it.localizedMessage ?: "Recache failed"
+                                        DownloadManager.enqueue(details.id, details.name, DownloadAction.RECACHE)
+                                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                            val nm = context.getSystemService(NotificationManager::class.java)
+                                            if (nm.areNotificationsEnabled()) {
+                                                context.startForegroundService(Intent(context, DownloadService::class.java))
+                                            } else {
+                                                downloadMessage = "Enable notifications to see download progress"
                                             }
-                                            isDownloading = false
+                                        } else {
+                                            context.startForegroundService(Intent(context, DownloadService::class.java))
                                         }
                                     }
                                 )

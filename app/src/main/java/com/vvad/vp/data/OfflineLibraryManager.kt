@@ -96,6 +96,11 @@ class OfflineLibraryManager(context: Context) {
         }
     }
 
+    suspend fun clearAlbumAudioCache(albumId: String) = withContext(Dispatchers.IO) {
+        val details = readAlbumRecord(albumId)?.details ?: return@withContext
+        clearAlbumAudioCache(details)
+    }
+
     suspend fun getCachedTrackIds(albumId: String): Set<String> = withContext(Dispatchers.IO) {
         readAlbumRecord(albumId)?.details
             ?.tracks
@@ -106,7 +111,8 @@ class OfflineLibraryManager(context: Context) {
 
     suspend fun downloadAlbumForOffline(
         details: AlbumDetails,
-        navidromeManager: NavidromeManager
+        navidromeManager: NavidromeManager,
+        onProgress: (currentTrack: Int, totalTracks: Int, trackName: String) -> Unit = { _, _, _ -> }
     ): OfflineDownloadResult = withContext(Dispatchers.IO) {
         val cachedAlbum = cacheAlbum(details)
         val format = navidromeManager.credentialsManager.getPreferredFormat()
@@ -114,7 +120,8 @@ class OfflineLibraryManager(context: Context) {
         val cacheDataSourceFactory = AudioCache.buildCacheDataSourceFactory(appContext)
         var downloadedTracks = 0
 
-        cachedAlbum.tracks.forEach { track ->
+        cachedAlbum.tracks.forEachIndexed { index, track ->
+            onProgress(index + 1, cachedAlbum.tracks.size, track.title)
             val streamUrl = navidromeManager.getStreamUrl(track.id)
             val cacheKey = AudioCache.buildTrackCacheKey(track.id, format, bitrate)
             val dataSpec = DataSpec.Builder()
