@@ -74,6 +74,10 @@ class PlaybackService : MediaSessionService() {
                 updateNotification()
             }
 
+            override fun onPlaybackStateChanged(state: Int) {
+                updateNotification()
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 updateNotification()
                 if (isPlaying) startProgressUpdates() else stopProgressUpdates()
@@ -209,9 +213,6 @@ class PlaybackService : MediaSessionService() {
             buildActionIntent(ACTION_NEXT)
         )
 
-        val progressMax = (playbackManager.duration / 1000).coerceAtLeast(0).toInt()
-        val progressCurrent = (playbackManager.currentPosition / 1000).coerceAtLeast(0).toInt()
-
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.vp_applogowhite)
             .setContentTitle(title)
@@ -228,7 +229,7 @@ class PlaybackService : MediaSessionService() {
             .addAction(prevAction)
             .addAction(playPauseAction)
             .addAction(nextAction)
-            .setProgress(progressMax, progressCurrent, false)
+            .setProgress(0, 0, false)
             .build()
     }
 
