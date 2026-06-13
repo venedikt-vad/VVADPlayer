@@ -28,6 +28,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+interface TrackChangeListener {
+    fun onTrackChanged()
+}
+
 @UnstableApi
 class PlaybackManager(context: Context, private val navidromeManager: NavidromeManager) {
     companion object {
@@ -41,6 +45,16 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         val albumName: String,
         val coverArtUrl: String
     )
+
+    private var trackChangeListener: TrackChangeListener? = null
+
+    fun setTrackChangeListener(listener: TrackChangeListener?) {
+        trackChangeListener = listener
+    }
+
+    private fun notifyTrackChanged() {
+        trackChangeListener?.onTrackChanged()
+    }
 
     private val appContext = context.applicationContext
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -212,6 +226,20 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         }
         queue = newQueue
 
+        val startIdx = startIndex.coerceIn(0, newQueue.lastIndex)
+        currentQueueIndex = startIdx
+        val entry = newQueue[startIdx]
+        currentTrack = entry.track
+        currentAlbumId = entry.albumId
+        currentAlbumName = entry.albumName
+        currentCoverArtUrl = entry.coverArtUrl
+        hasScrobbled = false
+        isCurrentTrackFavorite = entry.track.id in favoriteTrackIds
+
+        // Force immediate sync so notification gets correct duration instantly
+        syncProgress()
+        notifyTrackChanged()
+
         playbackJob?.cancel()
         playbackJob = scope.launch {
             try {
@@ -219,7 +247,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
 
                 exoPlayer.stop()
                 exoPlayer.clearMediaItems()
-                exoPlayer.setMediaItems(mediaItems, startIndex.coerceIn(0, mediaItems.lastIndex), C.TIME_UNSET)
+                exoPlayer.setMediaItems(mediaItems, startIdx, C.TIME_UNSET)
                 exoPlayer.playbackParameters = PlaybackParameters.DEFAULT
                 exoPlayer.playWhenReady = true
                 exoPlayer.prepare()

@@ -63,6 +63,13 @@ class PlaybackService : MediaSessionService() {
         val navidromeManager = NavidromeManager(credentialsManager, offlineLibraryManager)
         playbackManager = PlaybackManager(this, navidromeManager)
 
+        playbackManager.setTrackChangeListener(object : TrackChangeListener {
+            override fun onTrackChanged() {
+                loadAlbumArt()
+                updateNotification()
+            }
+        })
+
         mediaSession = MediaSession.Builder(this, playbackManager.exoPlayer)
             .build()
 
@@ -213,6 +220,12 @@ class PlaybackService : MediaSessionService() {
             buildActionIntent(ACTION_NEXT)
         )
 
+        val position = playbackManager.currentPosition
+        val totalDuration = playbackManager.duration
+        val progress = if (totalDuration > 0) {
+            (position * 1000 / totalDuration).toInt().coerceIn(0, 1000)  // 0-1000 for smoother notification progress
+        } else 0
+
         return NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setSmallIcon(R.drawable.vp_applogowhite)
             .setContentTitle(title)
@@ -229,8 +242,19 @@ class PlaybackService : MediaSessionService() {
             .addAction(prevAction)
             .addAction(playPauseAction)
             .addAction(nextAction)
-            .setProgress(0, 0, false)
+            // Use explicit progress (matches PlayerScreen behavior; falls back to metadata)
+            .setProgress(1000, progress, totalDuration <= 0)
+            // Optional: Show elapsed / remaining time in content info (visible in expanded view)
+            .setContentInfo("${formatTime(position)} / ${formatTime(totalDuration)}")
             .build()
+    }
+
+    private fun formatTime(milliseconds: Long): String {
+        if (milliseconds <= 0) return "00:00"
+        val totalSeconds = milliseconds / 1000
+        val minutes = totalSeconds / 60
+        val seconds = totalSeconds % 60
+        return "%02d:%02d".format(minutes, seconds)
     }
 
     private fun updateNotification() {
