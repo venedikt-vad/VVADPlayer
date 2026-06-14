@@ -89,7 +89,7 @@ class OfflineLibraryManager(context: Context, private val credentialsManager: Cr
     }
 
     suspend fun clearAlbumAudioCache(details: AlbumDetails) = withContext(Dispatchers.IO) {
-        val cache = AudioCache.getCache(appContext, credentialsManager)
+        val cache = AudioCache.getOfflineCache(appContext)
         details.tracks.forEach { track ->
             val keysToRemove = cache.getKeys().filter { it.startsWith("track:${track.id}:") }
             keysToRemove.forEach { key -> cache.removeResource(key) }
@@ -117,7 +117,7 @@ class OfflineLibraryManager(context: Context, private val credentialsManager: Cr
         val cachedAlbum = cacheAlbum(details)
         val format = navidromeManager.credentialsManager.getPreferredFormat()
         val bitrate = navidromeManager.credentialsManager.getMaxBitrate()
-        val cacheDataSourceFactory = AudioCache.buildCacheDataSourceFactory(appContext, navidromeManager.credentialsManager)
+        val cacheDataSourceFactory = AudioCache.buildOfflineCacheDataSourceFactory(appContext)
         var downloadedTracks = 0
 
         cachedAlbum.tracks.forEachIndexed { index, track ->
@@ -216,7 +216,7 @@ class OfflineLibraryManager(context: Context, private val credentialsManager: Cr
     }
 
     private fun isTrackCachedOffline(trackId: String): Boolean {
-        val cache = AudioCache.getCache(appContext)
+        val cache = AudioCache.getOfflineCache(appContext)
         val matchingKeys = cache.getKeys().filter { it.startsWith("track:$trackId:") }
         return matchingKeys.any { key ->
             val contentLength = ContentMetadata.getContentLength(cache.getContentMetadata(key))

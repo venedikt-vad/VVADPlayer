@@ -27,6 +27,8 @@ object AudioCache {
     }
     @Volatile
     private var sharedCache: SimpleCache? = null
+    @Volatile
+    private var sharedOfflineCache: SimpleCache? = null
 
     fun getCache(context: Context, cacheSizeMb: Int = 512, unlimited: Boolean = false): SimpleCache {
         val appContext = context.applicationContext
@@ -37,6 +39,21 @@ object AudioCache {
                 StandaloneDatabaseProvider(appContext)
             ).also { sharedCache = it }
         }
+    }
+
+    fun getOfflineCache(context: Context): SimpleCache {
+        val appContext = context.applicationContext
+        return sharedOfflineCache ?: synchronized(this) {
+            sharedOfflineCache ?: SimpleCache(
+                File(appContext.filesDir, "offline_audio_cache"),
+                NoopCacheEvictor(),
+                StandaloneDatabaseProvider(appContext)
+            ).also { sharedOfflineCache = it }
+        }
+    }
+
+    fun resetOfflineCache() {
+        sharedOfflineCache = null
     }
 
     suspend fun getCache(context: Context, credentialsManager: CredentialsManager): SimpleCache {
@@ -66,6 +83,13 @@ object AudioCache {
         val unlimited = credentialsManager.isCacheUnlimited()
         val size = credentialsManager.getCacheSizeMb()
         return buildCacheDataSourceFactory(context, size, unlimited)
+    }
+
+    fun buildOfflineCacheDataSourceFactory(context: Context): CacheDataSource.Factory {
+        return CacheDataSource.Factory()
+            .setCache(getOfflineCache(context))
+            .setUpstreamDataSourceFactory(buildUpstreamDataSourceFactory())
+            .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
     }
 
     fun buildTrackCacheKey(trackId: String, format: String, bitrate: Int): String {
