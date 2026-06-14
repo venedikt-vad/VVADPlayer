@@ -47,3 +47,14 @@ data class ArtistDetails(
     val coverArtUrl: String,
     val albums: MutableList<Album> = mutableListOf()
 )
+
+data class SongSearchResult(
+    val id: String,
+    val title: String,
+    val artist: String,
+    val artistId: String,
+    val album: String,
+    val albumId: String,
+    val coverArtUrl: String,
+    val duration: Int
+)

@@ -4,6 +4,7 @@ import android.util.Log
 import com.vvad.vp.ui.models.Album
 import com.vvad.vp.ui.models.AlbumDetails
 import com.vvad.vp.ui.models.ArtistDetails
+import com.vvad.vp.ui.models.SongSearchResult
 import com.vvad.vp.ui.models.Track
 import com.vvad.vp.ui.models.TrackArtist
 import kotlinx.coroutines.Dispatchers
@@ -337,6 +338,54 @@ class NavidromeManager(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during artist search", e)
+        }
+        return@withContext emptyList()
+    }
+
+    suspend fun searchSongs(query: String, limit: Int = 20): List<SongSearchResult> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext emptyList()
+        if (!ensureNativeAuth()) {
+            Log.e(TAG, "Native authentication failed while searching songs.")
+            return@withContext emptyList()
+        }
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        try {
+            val encodedQuery = URLEncoder.encode(query, "UTF-8")
+            val url = URL("$baseUrl/api/song?title=$encodedQuery&_end=$limit")
+            val urlConnection = url.openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "GET"
+            urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
+            urlConnection.setRequestProperty("x-nd-client-unique-id", nativeClientId)
+
+            if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
+                val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
+                val jsonArray = JSONArray(rawJson)
+                val results = mutableListOf<SongSearchResult>()
+                val smallSize = credentialsManager.getCoverSizeSmall()
+
+                for (i in 0 until jsonArray.length()) {
+                    val json = jsonArray.getJSONObject(i)
+                    val id = json.optString("id")
+                    val coverArtId = json.optString("coverArtId", json.optString("cover_art_id", id))
+
+                    results.add(
+                        SongSearchResult(
+                            id = id,
+                            title = json.optString("title"),
+                            artist = json.optString("artist", json.optString("artistName")),
+                            artistId = json.optString("artistId", json.optString("artist_id")),
+                            album = json.optString("album"),
+                            albumId = json.optString("albumId", json.optString("album_id")),
+                            coverArtUrl = getCoverArtUrl(coverArtId, smallSize),
+                            duration = json.optInt("duration", 0)
+                        )
+                    )
+                }
+                return@withContext results
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception during song search", e)
         }
         return@withContext emptyList()
     }

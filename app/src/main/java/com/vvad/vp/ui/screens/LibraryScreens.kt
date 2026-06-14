@@ -57,9 +57,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import android.content.Context
+import androidx.compose.ui.text.style.TextAlign
 import coil.compose.AsyncImage
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.ui.models.Album
+import com.vvad.vp.ui.models.SongSearchResult
 
 private enum class AlbumSortOption(val label: String) {
     NAME("Name"),
@@ -89,6 +91,7 @@ fun SearchScreen(
     var query by remember { mutableStateOf("") }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var artists by remember { mutableStateOf<List<Album>>(emptyList()) }
+    var songs by remember { mutableStateOf<List<SongSearchResult>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
 
     LaunchedEffect(query) {
@@ -96,6 +99,7 @@ fun SearchScreen(
         if (trimmed.isBlank()) {
             albums = emptyList()
             artists = emptyList()
+            songs = emptyList()
             isLoading = false
             return@LaunchedEffect
         }
@@ -103,6 +107,7 @@ fun SearchScreen(
         delay(300)
         albums = navidromeManager.searchAlbums(trimmed)
         artists = navidromeManager.searchArtists(trimmed)
+        songs = navidromeManager.searchSongs(trimmed)
         isLoading = false
     }
 
@@ -120,6 +125,9 @@ fun SearchScreen(
             val restNonComma = nonComma.filter { it !in topPlayed }
             topPlayed + restNonComma.sortedBy { it.name } + comma.sortedBy { it.name }
         }
+    }
+    val filteredSongs = remember(trimmedQuery, songs) {
+        if (trimmedQuery.isBlank()) emptyList() else songs
     }
 
     Column(
@@ -141,7 +149,7 @@ fun SearchScreen(
                 Icon(Icons.Default.Search, contentDescription = null)
             },
             placeholder = {
-                Text("Search albums and artists")
+                Text("Search albums, artists, and songs")
             }
         )
 
@@ -164,7 +172,7 @@ fun SearchScreen(
                 }
             }
 
-            filteredAlbums.isEmpty() && filteredArtists.isEmpty() -> {
+            filteredAlbums.isEmpty() && filteredArtists.isEmpty() && filteredSongs.isEmpty() -> {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                         text = "No matches found",
@@ -205,6 +213,20 @@ fun SearchScreen(
                                 album = album,
                                 onAlbumClick = { onAlbumClick(album.id) },
                                 onArtistClick = { onArtistClick(album.artistId) }
+                            )
+                        }
+                    }
+
+                    if (filteredSongs.isNotEmpty()) {
+                        item {
+                            SectionTitle("Songs")
+                        }
+                        items(filteredSongs, key = { "song-${it.id}" }) { song ->
+                            SearchSongRow(
+                                song = song,
+                                onSongClick = { onAlbumClick(song.albumId) },
+                                onArtistClick = { onArtistClick(song.artistId) },
+                                onAlbumClick = { onAlbumClick(song.albumId) }
                             )
                         }
                     }
@@ -650,7 +672,7 @@ private fun LibraryArtistGridTile(
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
-            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            textAlign = TextAlign.Center,
             modifier = Modifier.fillMaxWidth()
         )
     }
@@ -743,4 +765,60 @@ private fun LibraryArtistRow(
             )
         }
     }
+}
+
+@Composable
+private fun SearchSongRow(
+    song: SongSearchResult,
+    onSongClick: () -> Unit,
+    onArtistClick: () -> Unit,
+    onAlbumClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSongClick() },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        AsyncImage(
+            model = song.coverArtUrl,
+            contentDescription = song.title,
+            modifier = Modifier
+                .size(64.dp)
+                .clip(RoundedCornerShape(8.dp)),
+            contentScale = ContentScale.Crop
+        )
+
+        Spacer(modifier = Modifier.size(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = song.title,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = "${song.artist} • ${song.album}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Spacer(modifier = Modifier.size(8.dp))
+
+        Text(
+            text = formatDuration(song.duration),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun formatDuration(seconds: Int): String {
+    val min = seconds / 60
+    val sec = seconds % 60
+    return "%d:%02d".format(min, sec)
 }
