@@ -70,7 +70,7 @@ class PlaybackService : MediaSessionService() {
             }
         })
 
-        mediaSession = MediaSession.Builder(this, playbackManager.exoPlayer)
+        mediaSession = MediaSession.Builder(this, playbackManager.mediaSessionPlayer)
             .build()
 
         startForeground(NOTIFICATION_ID, buildNotification())

@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.MimeTypes
@@ -140,6 +141,21 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
                 }
             })
         }
+
+    // Android's media notification reads progress duration from the MediaSession player,
+    // so expose the same metadata-duration fallback that PlayerScreen uses.
+    val mediaSessionPlayer: Player = object : ForwardingPlayer(exoPlayer) {
+        override fun getDuration(): Long = resolveDurationForMediaSession()
+
+        override fun getContentDuration(): Long = resolveDurationForMediaSession()
+
+        override fun getCurrentPosition(): Long = exoPlayer.currentPosition.coerceAtLeast(0L)
+
+        override fun getBufferedPosition(): Long {
+            val position = getCurrentPosition()
+            return exoPlayer.bufferedPosition.coerceAtLeast(position)
+        }
+    }
 
     init {
         syncProgress()
@@ -434,6 +450,11 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         } else {
             (currentTrack?.duration?.toLong() ?: 0L) * 1000L
         }
+    }
+
+    private fun resolveDurationForMediaSession(): Long {
+        val resolvedDuration = maxOf(resolveDurationMs(), exoPlayer.currentPosition.coerceAtLeast(0L))
+        return if (resolvedDuration > 0L) resolvedDuration else C.TIME_UNSET
     }
 
     private fun String.toAudioMimeType(): String? = when (lowercase()) {
