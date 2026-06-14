@@ -53,17 +53,6 @@ fun SettingsScreen(
     val savedSmallSize by credentialsManager.coverSizeSmall.collectAsState(initial = 400)
     val savedLargeSize by credentialsManager.coverSizeLarge.collectAsState(initial = 800)
 
-    val savedCacheSizeMb by credentialsManager.cacheSizeMb.collectAsState(initial = 512)
-    val isUnlimited by credentialsManager.isCacheUnlimited.collectAsState(initial = false)
-
-    var cacheSliderValue by remember { mutableStateOf(512f) }
-
-    LaunchedEffect(savedCacheSizeMb) {
-        if (savedCacheSizeMb != -1) {
-            cacheSliderValue = savedCacheSizeMb.toFloat()
-        }
-    }
-
     val formats = listOf("raw", "mp3", "ogg", "aac")
     val bitrates = listOf(0, 128, 192, 256, 320)
 
@@ -267,52 +256,6 @@ fun SettingsScreen(
         }
 
         SettingsCategory(icon = Icons.Filled.Storage, title = "Cache") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("Unlimited", modifier = Modifier.weight(1f))
-                Switch(
-                    checked = isUnlimited,
-                    onCheckedChange = { checked ->
-                        scope.launch {
-                            credentialsManager.saveCacheSizeMb(cacheSliderValue.toInt(), checked)
-                            AudioCache.resetCache()
-                        }
-                    }
-                )
-            }
-
-            Text(
-                "Max Cache Size",
-                style = MaterialTheme.typography.labelMedium,
-                color = if (isUnlimited) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                        else MaterialTheme.colorScheme.onSurface
-            )
-            Slider(
-                value = cacheSliderValue,
-                onValueChange = { cacheSliderValue = it },
-                onValueChangeFinished = {
-                    scope.launch {
-                        credentialsManager.saveCacheSizeMb(cacheSliderValue.toInt(), isUnlimited)
-                        AudioCache.resetCache()
-                    }
-                },
-                valueRange = 100f..10000f,
-                steps = 98,
-                enabled = !isUnlimited
-            )
-            Text(
-                text = if (cacheSliderValue >= 1000f)
-                        "%.1f GB".format(cacheSliderValue / 1000f)
-                       else "${cacheSliderValue.toInt()} MB",
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (isUnlimited) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                        else MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
             OutlinedButton(
                 onClick = onNavigateToCachedAlbums,
                 modifier = Modifier.fillMaxWidth()
