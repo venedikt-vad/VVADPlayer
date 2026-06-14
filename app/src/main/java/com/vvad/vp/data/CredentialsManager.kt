@@ -20,6 +20,11 @@ class CredentialsManager(private val context: Context) {
 
         val PREFERRED_FORMAT = stringPreferencesKey("preferred_format")
         val MAX_BITRATE = intPreferencesKey("max_bitrate")
+
+        val COVER_SIZE_SMALL = intPreferencesKey("cover_size_small")
+        val COVER_SIZE_LARGE = intPreferencesKey("cover_size_large")
+
+        val CACHE_SIZE_MB = intPreferencesKey("cache_size_mb")
     }
     suspend fun getRawServer(): String = server.first()
     suspend fun getUsername(): String = user.first()
@@ -62,15 +67,28 @@ class CredentialsManager(private val context: Context) {
     // Add flows
     val coverSizeSmall: Flow<Int> = context.dataStore.data.map { it[COVER_SIZE_SMALL] ?: 400 }
     val coverSizeLarge: Flow<Int> = context.dataStore.data.map { it[COVER_SIZE_LARGE] ?: 800 }
+    val cacheSizeMb: Flow<Int> = context.dataStore.data.map { it[CACHE_SIZE_MB] ?: 512 }
+    val isCacheUnlimited: Flow<Boolean> = context.dataStore.data.map { (it[CACHE_SIZE_MB] ?: 512) == -1 }
 
     // Add helper
     suspend fun getCoverSizeSmall(): Int = coverSizeSmall.first()
     suspend fun getCoverSizeLarge(): Int = coverSizeLarge.first()
+    suspend fun getCacheSizeMb(): Int {
+        val v = cacheSizeMb.first()
+        return if (v == -1) 512 else v
+    }
+    suspend fun isCacheUnlimited(): Boolean = isCacheUnlimited.first()
 
     suspend fun saveCoverSizes(small: Int, large: Int) {
         context.dataStore.edit {
             it[COVER_SIZE_SMALL] = small.coerceIn(100, 2000)
             it[COVER_SIZE_LARGE] = large.coerceIn(300, 3000)
+        }
+    }
+
+    suspend fun saveCacheSizeMb(sizeMb: Int, unlimited: Boolean) {
+        context.dataStore.edit {
+            it[CACHE_SIZE_MB] = if (unlimited) -1 else sizeMb.coerceIn(100, 10000)
         }
     }
 

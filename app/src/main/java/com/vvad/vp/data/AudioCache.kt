@@ -4,7 +4,10 @@ import android.content.Context
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.database.StandaloneDatabaseProvider
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.cache.Cache
 import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.CacheEvictor
+import androidx.media3.datasource.cache.CacheSpan
 import androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor
 import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.extractor.DefaultExtractorsFactory
@@ -13,20 +16,37 @@ import java.io.File
 
 @UnstableApi
 object AudioCache {
-    private const val CACHE_SIZE_BYTES = 512L * 1024L * 1024L
 
+    private class NoopCacheEvictor : CacheEvictor {
+        override fun requiresCacheSpanTouches(): Boolean = false
+        override fun onCacheInitialized() {}
+        override fun onStartFile(cache: Cache, key: String, position: Long, maxLength: Long) {}
+        override fun onSpanAdded(cache: Cache, span: CacheSpan) {}
+        override fun onSpanRemoved(cache: Cache, span: CacheSpan) {}
+        override fun onSpanTouched(cache: Cache, oldSpan: CacheSpan, newSpan: CacheSpan) {}
+    }
     @Volatile
     private var sharedCache: SimpleCache? = null
 
-    fun getCache(context: Context): SimpleCache {
+    fun getCache(context: Context, cacheSizeMb: Int = 512, unlimited: Boolean = false): SimpleCache {
         val appContext = context.applicationContext
         return sharedCache ?: synchronized(this) {
             sharedCache ?: SimpleCache(
                 File(appContext.filesDir, "audio_cache"),
-                LeastRecentlyUsedCacheEvictor(CACHE_SIZE_BYTES),
+                if (unlimited) NoopCacheEvictor() else LeastRecentlyUsedCacheEvictor(cacheSizeMb.toLong() * 1024L * 1024L),
                 StandaloneDatabaseProvider(appContext)
             ).also { sharedCache = it }
         }
+    }
+
+    suspend fun getCache(context: Context, credentialsManager: CredentialsManager): SimpleCache {
+        val unlimited = credentialsManager.isCacheUnlimited()
+        val size = credentialsManager.getCacheSizeMb()
+        return getCache(context, size, unlimited)
+    }
+
+    fun resetCache() {
+        sharedCache = null
     }
 
     fun buildUpstreamDataSourceFactory(): DefaultHttpDataSource.Factory {
@@ -35,11 +55,17 @@ object AudioCache {
             .setAllowCrossProtocolRedirects(true)
     }
 
-    fun buildCacheDataSourceFactory(context: Context): CacheDataSource.Factory {
+    fun buildCacheDataSourceFactory(context: Context, cacheSizeMb: Int = 512, unlimited: Boolean = false): CacheDataSource.Factory {
         return CacheDataSource.Factory()
-            .setCache(getCache(context))
+            .setCache(getCache(context, cacheSizeMb, unlimited))
             .setUpstreamDataSourceFactory(buildUpstreamDataSourceFactory())
             .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+    }
+
+    suspend fun buildCacheDataSourceFactory(context: Context, credentialsManager: CredentialsManager): CacheDataSource.Factory {
+        val unlimited = credentialsManager.isCacheUnlimited()
+        val size = credentialsManager.getCacheSizeMb()
+        return buildCacheDataSourceFactory(context, size, unlimited)
     }
 
     fun buildTrackCacheKey(trackId: String, format: String, bitrate: Int): String {

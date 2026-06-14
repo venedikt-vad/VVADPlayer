@@ -59,7 +59,7 @@ class PlaybackService : MediaSessionService() {
         createNotificationChannel()
 
         val credentialsManager = CredentialsManager(this)
-        val offlineLibraryManager = OfflineLibraryManager(this)
+        val offlineLibraryManager = OfflineLibraryManager(this, credentialsManager)
         val navidromeManager = NavidromeManager(credentialsManager, offlineLibraryManager)
         playbackManager = PlaybackManager(this, navidromeManager)
 

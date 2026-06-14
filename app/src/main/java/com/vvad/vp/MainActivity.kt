@@ -96,7 +96,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val credentialsManager = CredentialsManager(this)
-        val offlineLibraryManager = OfflineLibraryManager(this)
+        val offlineLibraryManager = OfflineLibraryManager(this, credentialsManager)
         val navidromeManager = NavidromeManager(credentialsManager, offlineLibraryManager)
         DownloadManager.init(offlineLibraryManager, navidromeManager)
 
@@ -325,9 +325,23 @@ class MainActivity : ComponentActivity() {
                                     credentialsManager,
                                     navidromeManager,
                                     topContentPadding = topSafePadding,
-                                    bottomContentPadding = bottomSafePadding
+                                    bottomContentPadding = bottomSafePadding,
+                                    onNavigateToCachedAlbums = {
+                                        navController.navigate("cached-albums")
+                                    }
+                                )
+                            }
 
-                                    )
+                            composable("cached-albums") {
+                                CachedAlbumsScreen(
+                                    offlineLibraryManager = offlineLibraryManager,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding,
+                                    onBack = { navController.popBackStack() },
+                                    onAlbumClick = { albumId ->
+                                        navController.navigate("album/$albumId")
+                                    }
+                                )
                             }
 
                             composable("search") {

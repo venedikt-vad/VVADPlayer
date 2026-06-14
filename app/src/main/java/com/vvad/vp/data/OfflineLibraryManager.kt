@@ -31,7 +31,7 @@ data class AlbumOfflineAvailability(
 )
 
 @UnstableApi
-class OfflineLibraryManager(context: Context) {
+class OfflineLibraryManager(context: Context, private val credentialsManager: CredentialsManager) {
     private val appContext = context.applicationContext
     private val albumsDir = File(appContext.filesDir, "offline_library/albums").apply { mkdirs() }
     private val coversDir = File(appContext.filesDir, "offline_library/covers").apply { mkdirs() }
@@ -89,7 +89,7 @@ class OfflineLibraryManager(context: Context) {
     }
 
     suspend fun clearAlbumAudioCache(details: AlbumDetails) = withContext(Dispatchers.IO) {
-        val cache = AudioCache.getCache(appContext)
+        val cache = AudioCache.getCache(appContext, credentialsManager)
         details.tracks.forEach { track ->
             val keysToRemove = cache.getKeys().filter { it.startsWith("track:${track.id}:") }
             keysToRemove.forEach { key -> cache.removeResource(key) }
@@ -117,7 +117,7 @@ class OfflineLibraryManager(context: Context) {
         val cachedAlbum = cacheAlbum(details)
         val format = navidromeManager.credentialsManager.getPreferredFormat()
         val bitrate = navidromeManager.credentialsManager.getMaxBitrate()
-        val cacheDataSourceFactory = AudioCache.buildCacheDataSourceFactory(appContext)
+        val cacheDataSourceFactory = AudioCache.buildCacheDataSourceFactory(appContext, navidromeManager.credentialsManager)
         var downloadedTracks = 0
 
         cachedAlbum.tracks.forEachIndexed { index, track ->
