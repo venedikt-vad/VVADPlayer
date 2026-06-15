@@ -41,17 +41,19 @@ VP is a native Android client for [Navidrome](https://www.navidrome.org/) music 
 
 ## Screenshots
 
-| Library | Album | Player |
-|:-------:|:-----:|:------:|
-| ![Library](Misc/Screenshots/Screenshot_2026-06-14-22-06-44-617_com.vvad.vp.jpg) | ![Album](Misc/Screenshots/Screenshot_2026-06-14-22-06-33-903_com.vvad.vp.jpg) | ![Player](Misc/Screenshots/Screenshot_2026-06-14-22-06-27-294_com.vvad.vp.jpg) |
-
-| Queue | Cached | Settings |
-|:-----:|:------:|:--------:|
-| ![Queue](Misc/Screenshots/Screenshot_2026-06-14-22-06-00-138_com.vvad.vp.jpg) | ![Cached](Misc/Screenshots/Screenshot_2026-06-14-22-05-03-422_com.vvad.vp.jpg) | ![Settings](Misc/Screenshots/Screenshot_2026-06-14-22-04-47-709_com.vvad.vp.jpg) |
-
-| Search | Artist | Downloads |
+| Album | Home | Home |
 |:------:|:------:|:---------:|
-| ![Search](Misc/Screenshots/Screenshot_2026-06-14-22-04-31-734_com.vvad.vp.jpg) | ![Artist](Misc/Screenshots/Screenshot_2026-06-14-22-03-31-559_com.vvad.vp.jpg) | ![Downloads](Misc/Screenshots/Screenshot_2026-06-14-22-03-25-469_com.vvad.vp.jpg) |
+| ![Album](Misc/Screenshots/Screenshot_2026-06-14-22-06-27-294_com.vvad.vp.jpg) | ![Home](Misc/Screenshots/Screenshot_2026-06-14-22-03-31-559_com.vvad.vp.jpg) | ![Home](Misc/Screenshots/Screenshot_2026-06-14-22-03-25-469_com.vvad.vp.jpg) |
+
+| Queue | Player | Search |
+|:-------:|:-----:|:------:|
+| ![Queue](Misc/Screenshots/Screenshot_2026-06-14-22-06-44-617_com.vvad.vp.jpg) | ![Player](Misc/Screenshots/Screenshot_2026-06-14-22-06-33-903_com.vvad.vp.jpg) | ![Search](Misc/Screenshots/Screenshot_2026-06-14-22-04-31-734_com.vvad.vp.jpg)  |
+
+| Artist | Artists | Albums |
+|:-----:|:------:|:--------:|
+| ![Artist](Misc/Screenshots/Screenshot_2026-06-14-22-06-00-138_com.vvad.vp.jpg) | ![Artists](Misc/Screenshots/Screenshot_2026-06-14-22-05-03-422_com.vvad.vp.jpg) | ![Albums](Misc/Screenshots/Screenshot_2026-06-14-22-04-47-709_com.vvad.vp.jpg) |
+
+
 
 ---
 
