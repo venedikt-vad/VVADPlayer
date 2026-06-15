@@ -56,7 +56,3 @@ VP is a native Android client for [Navidrome](https://www.navidrome.org/) music 
 
 
 ---
-
-## License
-
-MIT License — see [LICENSE](LICENSE) for details.
