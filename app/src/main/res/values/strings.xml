@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">VVADPlayer</string>
+    <string name="app_name">VP</string>
     <string name="notification_channel_name">Music Playback</string>
     <string name="notification_channel_description">Shows the currently playing track</string>
 </resources>
