@@ -63,6 +63,7 @@ fun AlbumScreen(
     onArtistClick: (String) -> Unit,
     onCurrentTrackClick: () -> Unit,
     onTrackClick: (List<Track>, Int, String, String, String) -> Unit,
+    onTrackDoubleClick: (Track, String, String, String) -> Unit,
     onTrackLongClick: (Track, String, String, String) -> Unit
 ) {
     var album by remember { mutableStateOf<AlbumDetails?>(null) }
@@ -379,6 +380,15 @@ fun AlbumScreen(
                                                     details.coverArtUrl
                                                 )
                                             }
+                                        },
+                                        onDoubleClick = {
+                                            flashCounts[track.id] = (flashCounts[track.id] ?: 0) + 1
+                                            onTrackDoubleClick(
+                                                track,
+                                                details.id,
+                                                details.name,
+                                                details.coverArtUrl
+                                            )
                                         },
                                         onLongClick = {
                                             flashCounts[track.id] = (flashCounts[track.id] ?: 0) + 1

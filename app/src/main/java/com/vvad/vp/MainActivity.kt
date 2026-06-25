@@ -413,6 +413,14 @@ class MainActivity : ComponentActivity() {
                                             coverUrl
                                         )
                                     },
+                                    onTrackDoubleClick = { track, queuedAlbumId, albumName, coverUrl ->
+                                        pm?.queueNext(
+                                            track,
+                                            queuedAlbumId,
+                                            albumName,
+                                            coverUrl
+                                        )
+                                    },
                                     onTrackLongClick = { track, queuedAlbumId, albumName, coverUrl ->
                                         pm?.appendToQueue(
                                             track,

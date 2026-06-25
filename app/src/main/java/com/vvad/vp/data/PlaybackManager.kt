@@ -327,6 +327,34 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         }
     }
 
+    fun queueNext(track: Track, albumId: String, albumName: String, coverArtUrl: String) {
+        val entry = QueueEntry(
+            track = track,
+            albumId = albumId,
+            albumName = albumName,
+            coverArtUrl = coverArtUrl
+        )
+
+        if (queue.isEmpty() || currentQueueIndex !in queue.indices || currentTrack == null) {
+            replaceQueue(listOf(track), 0, albumId, albumName, coverArtUrl)
+            return
+        }
+
+        val insertIndex = currentQueueIndex + 1
+        val newQueue = queue.toMutableList()
+        newQueue.add(insertIndex, entry)
+        queue = newQueue
+
+        scope.launch {
+            try {
+                val mediaItem = buildMediaItem(entry)
+                exoPlayer.addMediaItem(insertIndex, mediaItem)
+            } catch (e: Exception) {
+                Log.e("Playback", "queueNext failed", e)
+            }
+        }
+    }
+
     private suspend fun buildMediaItem(entry: QueueEntry): MediaItem {
         val track = entry.track
         val localFile = offlineLibraryManager.getLocalTrackFile(track.id)
