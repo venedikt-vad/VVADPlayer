@@ -61,7 +61,7 @@ class PlaybackService : MediaSessionService() {
         val credentialsManager = CredentialsManager(this)
         val offlineLibraryManager = OfflineLibraryManager(this, credentialsManager)
         val navidromeManager = NavidromeManager(credentialsManager, offlineLibraryManager)
-        playbackManager = PlaybackManager(this, navidromeManager)
+        playbackManager = PlaybackManager(this, navidromeManager, offlineLibraryManager)
 
         playbackManager.setTrackChangeListener(object : TrackChangeListener {
             override fun onTrackChanged() {

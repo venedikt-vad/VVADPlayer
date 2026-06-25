@@ -312,15 +312,18 @@ private fun SettingsCategory(
 
 private suspend fun clearAllCaches(context: Context) {
     AudioCache.resetCache()
-    AudioCache.resetOfflineCache()
     val appContext = context.applicationContext
     val cacheDir = File(appContext.filesDir, "audio_cache")
     val offlineCacheDir = File(appContext.filesDir, "offline_audio_cache")
+    val offlineDir = File(appContext.filesDir, "offline")
     if (cacheDir.exists()) {
         cacheDir.deleteRecursively()
     }
     if (offlineCacheDir.exists()) {
         offlineCacheDir.deleteRecursively()
+    }
+    if (offlineDir.exists()) {
+        offlineDir.deleteRecursively()
     }
 }
 

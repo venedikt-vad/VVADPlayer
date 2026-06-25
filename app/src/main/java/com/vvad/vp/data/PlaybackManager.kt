@@ -18,6 +18,10 @@ import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionParameters
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.DataSpec
+import androidx.media3.datasource.FileDataSource
+import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
@@ -34,7 +38,7 @@ interface TrackChangeListener {
 }
 
 @UnstableApi
-class PlaybackManager(context: Context, private val navidromeManager: NavidromeManager) {
+class PlaybackManager(context: Context, private val navidromeManager: NavidromeManager, private val offlineLibraryManager: OfflineLibraryManager) {
     companion object {
         private const val BACK_BUFFER_MS = 10 * 60 * 1000
         private const val PREVIOUS_RESTART_THRESHOLD_MS = 5_000L
@@ -81,7 +85,33 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     fun isTrackFavorite(trackId: String): Boolean = trackId in favoriteTrackIds
 
     private val extractorsFactory = AudioCache.buildExtractorsFactory()
-    private val cacheDataSourceFactory = AudioCache.buildCacheDataSourceFactory(appContext)
+    private val dataSourceFactory = DataSource.Factory {
+        val cacheFactory = AudioCache.buildCacheDataSourceFactory(appContext)
+        val cacheSource = cacheFactory.createDataSource()
+        val fileSource = FileDataSource()
+        object : DataSource {
+            private var delegate: DataSource? = null
+
+            override fun addTransferListener(listener: TransferListener) {
+                cacheSource.addTransferListener(listener)
+                fileSource.addTransferListener(listener)
+            }
+
+            override fun open(dataSpec: DataSpec): Long {
+                delegate = when (dataSpec.uri.scheme) {
+                    "file", "content" -> fileSource
+                    else -> cacheSource
+                }
+                return delegate!!.open(dataSpec)
+            }
+
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int =
+                delegate!!.read(buffer, offset, length)
+
+            override fun getUri(): Uri? = delegate?.uri
+            override fun close() { delegate?.close() }
+        }
+    }
 
     val exoPlayer = ExoPlayer.Builder(context)
         .setAudioAttributes(
@@ -98,7 +128,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
                 .build()
         )
         .setMediaSourceFactory(
-            ProgressiveMediaSource.Factory(cacheDataSourceFactory, extractorsFactory)
+            ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory)
         )
         .build()
         .apply {
@@ -299,9 +329,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
 
     private suspend fun buildMediaItem(entry: QueueEntry): MediaItem {
         val track = entry.track
-        val streamUrl = navidromeManager.getStreamUrl(track.id)
-        val preferredFormat = navidromeManager.credentialsManager.getPreferredFormat()
-        val preferredBitrate = navidromeManager.credentialsManager.getMaxBitrate()
+        val localFile = offlineLibraryManager.getLocalTrackFile(track.id)
         val metadata = MediaMetadata.Builder()
             .setTitle(track.title)
             .setArtist(track.artists.joinToString(", ") { it.name })
@@ -309,13 +337,26 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
                 if (entry.coverArtUrl.isNotBlank()) setArtworkUri(Uri.parse(entry.coverArtUrl))
             }
             .build()
-        return MediaItem.Builder()
-            .setMediaId(track.id)
-            .setUri(streamUrl)
-            .setMimeType(preferredFormat.toAudioMimeType())
-            .setCustomCacheKey(AudioCache.buildTrackCacheKey(track.id, preferredFormat, preferredBitrate))
-            .setMediaMetadata(metadata)
-            .build()
+        return if (localFile != null) {
+            val mimeType = localFile.extension.lowercase().toAudioMimeType()
+            MediaItem.Builder()
+                .setMediaId(track.id)
+                .setUri(Uri.fromFile(localFile))
+                .setMimeType(mimeType)
+                .setMediaMetadata(metadata)
+                .build()
+        } else {
+            val streamUrl = navidromeManager.getStreamUrl(track.id)
+            val preferredFormat = navidromeManager.credentialsManager.getPreferredFormat()
+            val preferredBitrate = navidromeManager.credentialsManager.getMaxBitrate()
+            MediaItem.Builder()
+                .setMediaId(track.id)
+                .setUri(streamUrl)
+                .setMimeType(preferredFormat.toAudioMimeType())
+                .setCustomCacheKey(AudioCache.buildTrackCacheKey(track.id, preferredFormat, preferredBitrate))
+                .setMediaMetadata(metadata)
+                .build()
+        }
     }
 
     private suspend fun scrobble(trackId: String) {
