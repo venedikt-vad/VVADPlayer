@@ -32,6 +32,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 interface TrackChangeListener {
     fun onTrackChanged()
@@ -48,7 +49,8 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         val track: Track,
         val albumId: String,
         val albumName: String,
-        val coverArtUrl: String
+        val coverArtUrl: String,
+        val queueId: String = UUID.randomUUID().toString()
     )
 
     private var trackChangeListener: TrackChangeListener? = null
@@ -79,7 +81,8 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     var bufferedPosition by mutableLongStateOf(0L)
     var duration by mutableLongStateOf(0L)
 
-    private val favoriteTrackIds = mutableSetOf<String>()
+    private var favoriteTrackIds by mutableStateOf<Set<String>>(emptySet())
+    private val favoriteMutationVersions = mutableMapOf<String, Int>()
     var isCurrentTrackFavorite by mutableStateOf(false)
         private set
     fun isTrackFavorite(trackId: String): Boolean = trackId in favoriteTrackIds
@@ -192,7 +195,10 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
 
         scope.launch {
             val starredIds = navidromeManager.getStarredTrackIds()
-            favoriteTrackIds.addAll(starredIds)
+            favoriteTrackIds = favoriteTrackIds + starredIds
+            if (currentTrack?.id in favoriteTrackIds) {
+                isCurrentTrackFavorite = true
+            }
         }
 
         scope.launch {
@@ -304,53 +310,89 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     }
 
     fun appendToQueue(track: Track, albumId: String, albumName: String, coverArtUrl: String) {
-        val entry = QueueEntry(
-            track = track,
+        addTracksToQueue(
+            tracks = listOf(track),
             albumId = albumId,
             albumName = albumName,
-            coverArtUrl = coverArtUrl
+            coverArtUrl = coverArtUrl,
+            insertAfterCurrent = false
         )
+    }
 
-        if (queue.isEmpty() || currentQueueIndex !in queue.indices || currentTrack == null) {
-            replaceQueue(listOf(track), 0, albumId, albumName, coverArtUrl)
-            return
-        }
-
-        queue = queue + entry
-        scope.launch {
-            try {
-                val mediaItem = buildMediaItem(entry)
-                exoPlayer.addMediaItem(mediaItem)
-            } catch (e: Exception) {
-                Log.e("Playback", "appendToQueue failed", e)
-            }
-        }
+    fun appendAlbumToQueue(tracks: List<Track>, albumId: String, albumName: String, coverArtUrl: String) {
+        addTracksToQueue(
+            tracks = tracks,
+            albumId = albumId,
+            albumName = albumName,
+            coverArtUrl = coverArtUrl,
+            insertAfterCurrent = false
+        )
     }
 
     fun queueNext(track: Track, albumId: String, albumName: String, coverArtUrl: String) {
-        val entry = QueueEntry(
-            track = track,
+        addTracksToQueue(
+            tracks = listOf(track),
             albumId = albumId,
             albumName = albumName,
-            coverArtUrl = coverArtUrl
+            coverArtUrl = coverArtUrl,
+            insertAfterCurrent = true
         )
+    }
+
+    fun queueAlbumNext(tracks: List<Track>, albumId: String, albumName: String, coverArtUrl: String) {
+        addTracksToQueue(
+            tracks = tracks,
+            albumId = albumId,
+            albumName = albumName,
+            coverArtUrl = coverArtUrl,
+            insertAfterCurrent = true
+        )
+    }
+
+    private fun addTracksToQueue(
+        tracks: List<Track>,
+        albumId: String,
+        albumName: String,
+        coverArtUrl: String,
+        insertAfterCurrent: Boolean
+    ) {
+        if (tracks.isEmpty()) return
 
         if (queue.isEmpty() || currentQueueIndex !in queue.indices || currentTrack == null) {
-            replaceQueue(listOf(track), 0, albumId, albumName, coverArtUrl)
+            replaceQueue(tracks, 0, albumId, albumName, coverArtUrl)
             return
         }
 
-        val insertIndex = currentQueueIndex + 1
-        val newQueue = queue.toMutableList()
-        newQueue.add(insertIndex, entry)
-        queue = newQueue
+        val entries = tracks.map { track ->
+            QueueEntry(
+                track = track,
+                albumId = albumId,
+                albumName = albumName,
+                coverArtUrl = coverArtUrl
+            )
+        }
 
         scope.launch {
-            try {
-                val mediaItem = buildMediaItem(entry)
-                exoPlayer.addMediaItem(insertIndex, mediaItem)
+            val mediaItems = try {
+                entries.map { entry -> buildMediaItem(entry) }
             } catch (e: Exception) {
-                Log.e("Playback", "queueNext failed", e)
+                Log.e("Playback", "Failed to build queue media items", e)
+                return@launch
+            }
+
+            if (queue.isEmpty() || currentQueueIndex !in queue.indices || currentTrack == null) {
+                replaceQueue(tracks, 0, albumId, albumName, coverArtUrl)
+                return@launch
+            }
+
+            val insertIndex = if (insertAfterCurrent) currentQueueIndex + 1 else queue.size
+            val oldQueue = queue
+            queue = queue.toMutableList().apply { addAll(insertIndex, entries) }
+            try {
+                exoPlayer.addMediaItems(insertIndex, mediaItems)
+            } catch (e: Exception) {
+                queue = oldQueue
+                Log.e("Playback", "Failed to add queue media items", e)
             }
         }
     }
@@ -412,20 +454,35 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     }
 
     fun toggleFavorite(track: Track) {
+        val trackId = track.id
+        val makeFavorite = trackId !in favoriteTrackIds
+        val mutationVersion = (favoriteMutationVersions[trackId] ?: 0) + 1
+        favoriteMutationVersions[trackId] = mutationVersion
+        setFavoriteLocally(trackId, makeFavorite)
+
         scope.launch {
-            if (track.id in favoriteTrackIds) {
-                val success = navidromeManager.unstarTrack(track.id)
-                if (success) {
-                    favoriteTrackIds.remove(track.id)
-                    if (track.id == currentTrack?.id) isCurrentTrackFavorite = false
-                }
+            val success = if (makeFavorite) {
+                navidromeManager.starTrack(trackId)
             } else {
-                val success = navidromeManager.starTrack(track.id)
-                if (success) {
-                    favoriteTrackIds.add(track.id)
-                    if (track.id == currentTrack?.id) isCurrentTrackFavorite = true
-                }
+                navidromeManager.unstarTrack(trackId)
             }
+            if (!success && favoriteMutationVersions[trackId] == mutationVersion) {
+                setFavoriteLocally(trackId, !makeFavorite)
+            }
+            if (favoriteMutationVersions[trackId] == mutationVersion) {
+                favoriteMutationVersions.remove(trackId)
+            }
+        }
+    }
+
+    private fun setFavoriteLocally(trackId: String, isFavorite: Boolean) {
+        favoriteTrackIds = if (isFavorite) {
+            favoriteTrackIds + trackId
+        } else {
+            favoriteTrackIds - trackId
+        }
+        if (trackId == currentTrack?.id) {
+            isCurrentTrackFavorite = isFavorite
         }
     }
 
@@ -449,28 +506,62 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         }
     }
 
-    fun removeFromQueue(trackId: String) {
-        val index = queue.indexOfFirst { it.track.id == trackId }
-        if (index == -1) return
-        if (queue.size <= 1) return
-        scope.launch {
-            val newQueue = queue.toMutableList()
-            newQueue.removeAt(index)
-            val newIndex = when {
-                index < currentQueueIndex -> currentQueueIndex - 1
-                index == currentQueueIndex -> currentQueueIndex.coerceAtMost(newQueue.lastIndex)
-                else -> currentQueueIndex
-            }
-            queue = newQueue
-            currentQueueIndex = newIndex
-            currentTrack = newQueue.getOrNull(newIndex)?.track
-            currentAlbumId = newQueue.getOrNull(newIndex)?.albumId
-            currentAlbumName = newQueue.getOrNull(newIndex)?.albumName ?: ""
-            currentCoverArtUrl = newQueue.getOrNull(newIndex)?.coverArtUrl ?: ""
-            if (exoPlayer.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) {
-                exoPlayer.removeMediaItem(index)
-            }
+    fun removeQueueItem(queueId: String): Boolean {
+        val index = queue.indexOfFirst { it.queueId == queueId }
+        return removeQueueItemAt(index)
+    }
+
+    fun removeQueueItemAt(index: Int): Boolean {
+        if (index !in queue.indices) return false
+        if (index == currentQueueIndex) return false
+        if (queue.size <= 1) return false
+        if (!exoPlayer.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
+
+        val oldQueue = queue
+        val oldCurrentIndex = currentQueueIndex
+        val currentEntry = queue.getOrNull(oldCurrentIndex) ?: return false
+        val newQueue = queue.toMutableList().apply { removeAt(index) }
+        val newCurrentIndex = newQueue.indexOfFirst { it.queueId == currentEntry.queueId }
+        if (newCurrentIndex == -1) return false
+
+        queue = newQueue
+        currentQueueIndex = newCurrentIndex
+        try {
+            exoPlayer.removeMediaItem(index)
+        } catch (e: Exception) {
+            queue = oldQueue
+            currentQueueIndex = oldCurrentIndex
+            Log.e("Playback", "Failed to remove queue item", e)
+            return false
         }
+        return true
+    }
+
+    fun moveQueueItem(fromIndex: Int, toIndex: Int): Boolean {
+        if (fromIndex !in queue.indices || toIndex !in queue.indices) return false
+        if (fromIndex == toIndex) return false
+        if (!exoPlayer.isCommandAvailable(Player.COMMAND_CHANGE_MEDIA_ITEMS)) return false
+
+        val oldQueue = queue
+        val oldCurrentIndex = currentQueueIndex
+        val currentEntry = queue.getOrNull(oldCurrentIndex) ?: return false
+        val newQueue = queue.toMutableList().apply {
+            add(toIndex, removeAt(fromIndex))
+        }
+        val newCurrentIndex = newQueue.indexOfFirst { it.queueId == currentEntry.queueId }
+        if (newCurrentIndex == -1) return false
+
+        queue = newQueue
+        currentQueueIndex = newCurrentIndex
+        try {
+            exoPlayer.moveMediaItem(fromIndex, toIndex)
+        } catch (e: Exception) {
+            queue = oldQueue
+            currentQueueIndex = oldCurrentIndex
+            Log.e("Playback", "Failed to move queue item", e)
+            return false
+        }
+        return true
     }
 
     fun clearQueueExceptCurrent() {

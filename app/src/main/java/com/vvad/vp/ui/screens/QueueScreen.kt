@@ -77,7 +77,7 @@ fun QueueScreen(
             ) {
                 itemsIndexed(
                     items = queue,
-                    key = { index, entry -> "${entry.track.id}_$index" }
+                    key = { _, entry -> entry.queueId }
                 ) { index, entry ->
                     val isCurrent = index == currentIndex
 
@@ -132,7 +132,7 @@ fun QueueScreen(
                             state = rememberSwipeToDismissBoxState(
                                 confirmValueChange = { dismissValue ->
                                     if (dismissValue == SwipeToDismissBoxValue.EndToStart) {
-                                        playbackManager.removeFromQueue(entry.track.id)
+                                        playbackManager.removeQueueItem(entry.queueId)
                                         true
                                     } else {
                                         false
