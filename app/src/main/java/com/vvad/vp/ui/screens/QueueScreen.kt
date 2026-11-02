@@ -34,6 +34,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,6 +57,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlin.math.abs
+import kotlin.math.roundToInt
+
+private const val DRAG_REBASE_DISTANCE = 2
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,6 +79,9 @@ fun QueueScreen(
     val fallbackRowHeightPx = with(density) { 65.dp.toPx() }
 
     var draggedQueueId by remember { mutableStateOf<String?>(null) }
+    var draggedFromIndex by remember { mutableIntStateOf(-1) }
+    var draggedToIndex by remember { mutableIntStateOf(-1) }
+    var draggedItemHeight by remember { mutableFloatStateOf(fallbackRowHeightPx) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var autoScrollDirection by remember { mutableFloatStateOf(0f) }
     var autoScrollJob by remember { mutableStateOf<Job?>(null) }
@@ -84,22 +92,23 @@ fun QueueScreen(
         autoScrollJob = null
     }
 
-    fun applyDragReorder(queueId: String, itemHeight: Float) {
-        if (itemHeight <= 0f) return
-        var index = playbackManager.queue.indexOfFirst { it.queueId == queueId }
-        if (index == -1) return
-
-        while (dragOffsetY > itemHeight / 2f && index < playbackManager.queue.lastIndex) {
-            if (!playbackManager.moveQueueItem(index, index + 1)) break
-            dragOffsetY -= itemHeight
-            index++
+    fun updateDragTarget() {
+        if (draggedFromIndex == -1 || draggedItemHeight <= 0f) return
+        val steps = (dragOffsetY / draggedItemHeight).roundToInt()
+        val target = (draggedFromIndex + steps)
+            .coerceIn(0, playbackManager.queue.lastIndex)
+        if (target != draggedToIndex && draggedToIndex != -1) {
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         }
-        while (dragOffsetY < -itemHeight / 2f && index > 0) {
-            if (!playbackManager.moveQueueItem(index, index - 1)) break
-            dragOffsetY += itemHeight
-            index--
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        draggedToIndex = target
+
+        val distance = target - draggedFromIndex
+        if (abs(distance) >= DRAG_REBASE_DISTANCE &&
+            playbackManager.moveQueueItem(draggedFromIndex, target)
+        ) {
+            draggedFromIndex = target
+            dragOffsetY -= distance * draggedItemHeight
+            draggedToIndex = target
         }
     }
 
@@ -120,15 +129,10 @@ fun QueueScreen(
                 while (isActive) {
                     val activeDirection = autoScrollDirection
                     if (activeDirection == 0f) break
-                    val draggedId = draggedQueueId ?: break
-                    val itemHeight = listState.layoutInfo.visibleItemsInfo
-                        .firstOrNull { it.key == draggedId }
-                        ?.size
-                        ?.toFloat()
-                        ?: fallbackRowHeightPx
+                    if (draggedQueueId == null) break
                     val consumed = listState.scrollBy(activeDirection * 12f)
                     dragOffsetY += consumed
-                    applyDragReorder(draggedId, itemHeight)
+                    updateDragTarget()
                     delay(16)
                 }
             }
@@ -136,7 +140,14 @@ fun QueueScreen(
     }
 
     fun finishDrag() {
+        if (draggedFromIndex != -1 && draggedToIndex != -1 &&
+            draggedFromIndex != draggedToIndex
+        ) {
+            playbackManager.moveQueueItem(draggedFromIndex, draggedToIndex)
+        }
         draggedQueueId = null
+        draggedFromIndex = -1
+        draggedToIndex = -1
         dragOffsetY = 0f
         stopAutoScroll()
     }
@@ -193,13 +204,22 @@ fun QueueScreen(
                 ) { index, entry ->
                     val isCurrent = index == currentIndex
                     val isDragging = draggedQueueId == entry.queueId
+                    val shiftForDrag = when {
+                        isDragging -> dragOffsetY
+                        draggedFromIndex < 0 || draggedToIndex < 0 -> 0f
+                        draggedFromIndex < draggedToIndex &&
+                            index in (draggedFromIndex + 1)..draggedToIndex -> -draggedItemHeight
+                        draggedToIndex < draggedFromIndex &&
+                            index in draggedToIndex until draggedFromIndex -> draggedItemHeight
+                        else -> 0f
+                    }
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .zIndex(if (isDragging) 1f else 0f)
                             .graphicsLayer {
-                                translationY = if (isDragging) dragOffsetY else 0f
+                                translationY = shiftForDrag
                                 val scale = if (isDragging) 1.01f else 1f
                                 scaleX = scale
                                 scaleY = scale
@@ -264,19 +284,26 @@ fun QueueScreen(
                                 .pointerInput(entry.queueId) {
                                     detectDragGesturesAfterLongPress(
                                         onDragStart = {
+                                            val dragIndex = playbackManager.queue
+                                                .indexOfFirst { it.queueId == entry.queueId }
+                                            if (dragIndex == -1) return@detectDragGesturesAfterLongPress
+                                            val currentInfo = listState.layoutInfo.visibleItemsInfo
+                                                .firstOrNull { it.key == entry.queueId }
                                             draggedQueueId = entry.queueId
+                                            draggedFromIndex = dragIndex
+                                            draggedToIndex = dragIndex
+                                            draggedItemHeight = currentInfo?.size?.toFloat()
+                                                ?: fallbackRowHeightPx
                                             dragOffsetY = 0f
                                             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                         },
                                         onDrag = { change, dragAmount ->
                                             change.consume()
                                             dragOffsetY += dragAmount.y
+                                            updateDragTarget()
 
                                             val currentInfo = listState.layoutInfo.visibleItemsInfo
                                                 .firstOrNull { it.key == entry.queueId }
-                                            val itemHeight = currentInfo?.size?.toFloat() ?: fallbackRowHeightPx
-                                            applyDragReorder(entry.queueId, itemHeight)
-
                                             currentInfo?.let { info ->
                                                 val centerY = info.offset + info.size / 2f + dragOffsetY
                                                 updateAutoScroll(centerY)
@@ -305,7 +332,11 @@ fun QueueScreen(
                     }
 
                     if (index < queue.lastIndex) {
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                        HorizontalDivider(
+                            modifier = Modifier
+                                .graphicsLayer { translationY = shiftForDrag },
+                            color = Color.White.copy(alpha = 0.08f)
+                        )
                     }
                 }
             }
