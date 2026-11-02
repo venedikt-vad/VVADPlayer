@@ -295,7 +295,7 @@ class OfflineLibraryManager(context: Context, private val credentialsManager: Cr
                 title = trackJson.getString("title"),
                 artists = trackJson.optJSONArray("artists")?.toArtists().orEmpty(),
                 number = trackJson.optInt("number", 0),
-                discNumber = trackJson.optInt("discNumber", 1),
+                discNumber = trackJson.optInt("discNumber", 1).takeIf { it > 0 } ?: 1,
                 duration = trackJson.optInt("duration", 0)
             )
         }

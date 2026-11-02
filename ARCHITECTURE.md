@@ -124,7 +124,9 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 - Searches albums, artists, and songs after a 300 ms debounce.
 - Artist results are ordered as: top played non-comma artists, remaining non-comma artists alphabetically, then comma-containing artists.
 - Song results navigate to the song's album rather than starting playback directly.
-- No search history is persisted in the current implementation.
+- Recent searches are persisted globally in the `search_prefs` `SharedPreferences` file: newest first, deduplicated case-insensitively, capped at 10.
+- History is recorded only on keyboard search submit or when a result is opened, not on debounced keystrokes.
+- Blank-query view shows recent searches with tap-to-search, per-entry removal, and clear-all.
 
 #### AlbumsScreen / ArtistsScreen (`ui/screens/LibraryScreens.kt`)
 
@@ -133,6 +135,15 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 - List/grid toggle.
 - Preferences are stored in the `library_prefs` `SharedPreferences` file.
 - Album and artist rows/tiles open the corresponding detail screen.
+
+#### Album cards (`ui/components/AlbumCardGestures.kt`)
+
+- Shared gesture modifier used by Home, Albums, Artist, Search, and Cached Albums.
+- Single tap opens the album.
+- Double tap fetches the album's tracks and queues the whole album next.
+- Long press fetches the album's tracks and appends the whole album to the queue.
+- Both queue gestures give haptic feedback.
+- Album detail itself intentionally has no album-level queue menu.
 
 #### AlbumScreen (`ui/screens/AlbumScreen.kt`)
 
@@ -143,28 +154,34 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
   - Long-press or fully-cached click to open a menu.
   - Recache.
   - Delete cached files.
-- Tracks are grouped by `Track.discNumber` and sorted by disc, then track number.
-- Track rows support:
+- Tracks are grouped by normalized `Track.discNumber` (missing/zero becomes 1) and sorted by disc, then track number.
+- Multi-disc albums show `Disc X of N` headers; single-disc albums show no header.
+- Display order and the flat playback/queue list use the same sorted list.
+- Track rows use stable `pointerInput(track.id)` + `detectTapGestures` so recomposition does not break double taps:
   - Single tap: play track / toggle current track.
-  - Double tap: queue next.
-  - Long press: append to queue.
+  - Double tap: queue next (with haptic feedback).
+  - Long press: append to queue (with haptic feedback).
   - Favorite toggle.
+- Album detail has no album-level queue menu; queue actions live on album cards elsewhere.
+- Long multiline album titles are center-aligned.
 - When offline, uncached tracks are disabled.
-- Current known gap: long multiline album titles are not centered.
 
 #### ArtistScreen (`ui/screens/ArtistScreen.kt`)
 
 - Shows artist cover and name.
 - Tabs: Albums, Singles & EPs, Featured In.
-- Current single detection is based mainly on `Album.type` and album-name keywords. It does not yet use `songCount == 1`.
+- Single detection uses `songCount == 1`, album type, and album-name keywords.
+- Albums with missing or zero `songCount` are not classified as singles by count alone.
 - Album tiles show a one-line marquee title.
 
 #### QueueScreen (`ui/screens/QueueScreen.kt`)
 
 - Displays the current queue with the playing item highlighted.
-- Non-current items currently use `SwipeToDismissBox` to remove.
+- Each row has a stable `queueId` key so duplicate tracks remain distinct.
+- Non-current rows have an explicit delete button; the current row is protected.
+- Long-press drag handle reorders items, with edge auto-scroll and haptic feedback.
+- Reordered rows keep the ExoPlayer queue in sync through `PlaybackManager`.
 - Clear-queue action keeps only the current track.
-- No drag reordering in the current implementation.
 
 #### PlayerScreen (`ui/screens/PlayerScreen.kt`)
 
@@ -175,14 +192,17 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 - Seek slider with buffered-progress indicator.
 - Previous / play-pause / next controls.
 - Back button and system back close the player.
-- No swipe-down-to-close gesture yet.
+- Swipe down past a 120 dp threshold closes the player; shorter drags spring back.
+- Horizontal slider gestures are not affected.
 
 #### PlayerStripe (`ui/components/PlayerStripe.kt`)
 
 - Compact now-playing bar above the bottom navigation.
 - Shows cover, title, album name, play/pause button, and a 3 dp progress line.
 - Tapping opens `PlayerScreen`.
-- No swipe-to-skip gesture yet.
+- Horizontal swipe on the track-info area skips tracks: left = next, right = previous.
+- A 72 dp threshold prevents accidental skips; small drags snap back.
+- Play/pause keeps its own gesture area, and skipping is disabled for single-item queues.
 
 #### SettingsScreen (`ui/screens/SettingsScreen.kt`)
 
@@ -239,7 +259,8 @@ data class QueueEntry(
     val track: Track,
     val albumId: String,
     val albumName: String,
-    val coverArtUrl: String
+    val coverArtUrl: String,
+    val queueId: String = UUID.randomUUID().toString()
 )
 ```
 
@@ -258,9 +279,10 @@ data class QueueEntry(
 | Function | Behavior |
 |---|---|
 | `replaceQueue(tracks, startIndex, albumId, albumName, coverArtUrl)` | Replaces the queue with all tracks from one album, selects `startIndex`, resets ExoPlayer media items, and starts playback. |
-| `appendToQueue(track, ...)` | Appends one track to the end. If the queue is empty, replaces the queue with that single track. |
-| `queueNext(track, ...)` | Inserts one track immediately after the current queue index. |
-| `removeFromQueue(trackId)` | Removes the first queue item matching the track ID. Refuses when only one item remains. Adjusts the current index and removes the ExoPlayer media item. |
+| `appendToQueue(track, ...)` / `appendAlbumToQueue(tracks, ...)` | Appends one track or an album to the end. If the queue is empty, replaces the queue with those tracks. |
+| `queueNext(track, ...)` / `queueAlbumNext(tracks, ...)` | Inserts one track or an album immediately after the current queue index. |
+| `removeQueueItem(queueId)` / `removeQueueItemAt(index)` | Removes a specific queue entry by stable identity. Refuses to remove the current entry. Syncs the ExoPlayer media item. |
+| `moveQueueItem(fromIndex, toIndex)` | Moves a queue entry and its ExoPlayer media item, keeping the current index aligned. Returns `false` when unsupported or invalid. |
 | `clearQueueExceptCurrent()` | Rebuilds the queue and ExoPlayer media items with only the current track. |
 | `seekToQueueIndex(index)` | Seeks ExoPlayer to the default position of the specified queue index. |
 | `next()` | Seeks to the next ExoPlayer item if available. |
@@ -273,7 +295,8 @@ data class QueueEntry(
 - `syncProgress()` runs on player events and inside a 250 ms loop.
 - `duration` uses the ExoPlayer duration when known, otherwise falls back to `Track.duration * 1000`.
 - A track is scrobbled once per playback after 30 seconds.
-- Favorites are loaded from `getStarred2` on startup. Current implementation stores them in a non-observable `mutableSetOf`, which is the root cause of list hearts not updating.
+- Favorites are loaded from `getStarred2` on startup and stored in observable Compose state, so list hearts recompose immediately.
+- `toggleFavorite` updates optimistically and uses per-track mutation versions to avoid races: a failed star/unstar rolls back only if no newer toggle superseded it.
 
 #### MediaSession duration wrapper
 
@@ -463,8 +486,9 @@ Two authentication paths coexist:
 ### Parsing notes
 
 - `parseAlbumList` fills album ID, name, album artist, year, play count, play date, song count, duration, and creation date.
-- `parseTracks` reads track ID, title, artists, track number, disc number, and duration, then sorts by disc number and track number.
-- `parseArtistAlbums` currently marks compilation albums but otherwise uses `type = "album"`.
+- `parseArtistAlbums` also fills `songCount` so one-track albums can be classified as singles.
+- `parseTracks` reads track ID, title, artists, track number, disc number, and duration, normalizes missing/zero disc numbers to 1, then sorts by disc number and track number.
+- Disc numbers use `discNumber` → `disc_number` → `disc` fallbacks.
 - `getAlbum` attempts the network first and falls back to the cached album.
 - Native token expiration is not proactively refreshed; failed requests return `null`/empty results and are logged.
 
@@ -501,47 +525,41 @@ Implemented:
 - Artist detail with Albums / Singles & EPs / Featured In tabs.
 - Playback through ExoPlayer and MediaSession.
 - Foreground playback notification with transport controls.
-- Playback queue: replace, append, queue-next, seek, remove, clear.
-- Favorites via Subsonic star/unstar.
+- Playback queue: replace, append, queue-next, album card double-tap/long-press queue actions, seek, remove, drag reorder, clear.
+- Stable queue identity for duplicate tracks.
+- Favorites via Subsonic star/unstar with immediate UI updates.
 - Scrobbling after 30 seconds.
 - Streaming cache.
 - Offline album download, cache management, and offline playback.
 - Download progress notification.
 - Transcoding format/bitrate settings.
 - Cover-size and cache-management settings.
+- Global search history with per-entry removal and clear-all.
+- Player bar swipe-to-skip and player screen swipe-down-to-close.
+- Data-driven one-track single detection.
+- Multi-disc albums with normalized disc numbers and `Disc X of N` headers.
 
 Not implemented:
 
 - Server-side playlists or playlist screens.
-- Queue drag reordering.
-- Search history.
-- Swipe gestures on player bar/player screen.
-- Explicit queue remove buttons.
-- Album-level queue actions.
-- Reliable double-tap queue behavior in all cases.
-- Data-driven single detection.
-- Fully verified multi-disc rendering for all servers.
-- Automated test coverage beyond template tests.
+- Queue/download persistence across process death.
+- Automated UI test coverage beyond existing unit/template tests.
 
 ## 12. Known gaps and architectural risks
 
 1. **No ViewModel/DI layer** — managers are created manually, which is simple but makes state ownership and testing harder.
 2. **Duplicate manager instances** — activity and playback service each own separate manager objects.
-3. **Non-observable favorites** — list hearts do not currently recompose after toggling.
-4. **Queue identity uses track ID** — duplicate tracks in the queue are ambiguous for removal.
-5. **Parallel queue state** — Compose queue state and ExoPlayer media items are updated together manually, which is fragile during reorder/remove.
-6. **No reorder support** — `LazyColumn` is not reorderable.
-7. **Swipe-only removal** — no explicit remove button.
-8. **Long album titles** — album detail title is not center-aligned when wrapped.
-9. **Double-tap gesture** — first tap can trigger queue replacement and recomposition, interrupting double-tap detection.
-10. **Single detection** — relies on album type/name rather than `songCount`.
-11. **Multi-disc support needs verification** — grouping exists, but correctness depends on server metadata and disc-number normalization.
-12. **Streaming cache size setting is not applied** — `PlaybackManager` uses default `AudioCache` settings.
-13. **Download queue is in-memory** — process death loses pending/active downloads.
-14. **Native API token refresh** — expired JWTs are not refreshed automatically.
-15. **Credentials are stored in DataStore without encryption**.
-16. **No automated tests** — only the default example unit/instrumentation tests exist.
-17. **README is partially outdated** — queue swipe behavior and some controls will change after the work plan is implemented.
+3. **Parallel queue state** — Compose queue state and ExoPlayer media items are updated together manually; reorder/remove/album-queue paths must keep them in sync.
+4. **Manual drag reorder** — the custom implementation works without a dependency, but complex long-list behavior should be verified on a physical device.
+5. **Single detection fallback** — `songCount == 1` is authoritative when present; missing/zero counts still fall back to type/name heuristics.
+6. **Multi-disc server variance** — disc field names and zero values are normalized, but real-server metadata should still be spot-checked.
+7. **Streaming cache size setting is not applied** — `PlaybackManager` uses default `AudioCache` settings.
+8. **Download queue is in-memory** — process death loses pending/active downloads.
+9. **Queue/search state is not persisted across process death** except for search history, which is stored in `SharedPreferences`.
+10. **Native API token refresh** — expired JWTs are not refreshed automatically.
+11. **Credentials are stored in DataStore without encryption**.
+12. **No automated UI tests** — only existing unit/template tests exist.
+13. **Lint tooling is currently unstable** — Compose lint crashes on Kotlin metadata `1.9.0` vs expected `1.7.1`, and the custom queue drag detector triggers a `LazyLayoutStateReadInComposition` analysis failure. Upgrading AGP/Compose lint is the likely fix.
 
 ## 13. Key file map
 
@@ -550,6 +568,7 @@ Not implemented:
 | App entry, navigation, bottom/top bars | `MainActivity.kt` |
 | Player overlay | `ui/screens/PlayerScreen.kt` |
 | Mini player | `ui/components/PlayerStripe.kt` |
+| Album card gestures | `ui/components/AlbumCardGestures.kt` |
 | Queue | `ui/screens/QueueScreen.kt` |
 | Album detail | `ui/screens/AlbumScreen.kt` |
 | Artist detail | `ui/screens/ArtistScreen.kt` |

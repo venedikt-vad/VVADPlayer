@@ -60,8 +60,10 @@ import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.data.PlaybackManager
 import com.vvad.vp.data.PlaybackService
 import com.vvad.vp.ui.components.PlayerStripe
+import com.vvad.vp.ui.models.Album
 import com.vvad.vp.ui.screens.*
 import com.vvad.vp.ui.theme.VVADPlayerTheme
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
@@ -108,6 +110,31 @@ class MainActivity : ComponentActivity() {
             VVADPlayerTheme {
 
                 val navController = rememberNavController()
+                val scope = rememberCoroutineScope()
+                val queueAlbumFromList: (Album, Boolean) -> Unit = { album, playNext ->
+                    val pm = playbackManager
+                    if (pm != null) {
+                        scope.launch {
+                            val details = navidromeManager.getAlbum(album.id).album ?: return@launch
+                            if (details.tracks.isEmpty()) return@launch
+                            if (playNext) {
+                                pm.queueAlbumNext(
+                                    details.tracks,
+                                    details.id,
+                                    details.name,
+                                    details.coverArtUrl
+                                )
+                            } else {
+                                pm.appendAlbumToQueue(
+                                    details.tracks,
+                                    details.id,
+                                    details.name,
+                                    details.coverArtUrl
+                                )
+                            }
+                        }
+                    }
+                }
                 var isPlayerVisible by remember { mutableStateOf(false) }
 
                 val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -316,6 +343,12 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onArtistClick = { artistId ->
                                         navController.navigate("artist/$artistId")
+                                    },
+                                    onAlbumPlayNext = { album ->
+                                        queueAlbumFromList(album, true)
+                                    },
+                                    onAlbumAddToQueue = { album ->
+                                        queueAlbumFromList(album, false)
                                     }
                                 )
                             }
@@ -340,6 +373,12 @@ class MainActivity : ComponentActivity() {
                                     onBack = { navController.popBackStack() },
                                     onAlbumClick = { albumId ->
                                         navController.navigate("album/$albumId")
+                                    },
+                                    onAlbumPlayNext = { album ->
+                                        queueAlbumFromList(album, true)
+                                    },
+                                    onAlbumAddToQueue = { album ->
+                                        queueAlbumFromList(album, false)
                                     }
                                 )
                             }
@@ -354,6 +393,12 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onArtistClick = { artistId ->
                                         navController.navigate("artist/$artistId")
+                                    },
+                                    onAlbumPlayNext = { album ->
+                                        queueAlbumFromList(album, true)
+                                    },
+                                    onAlbumAddToQueue = { album ->
+                                        queueAlbumFromList(album, false)
                                     }
                                 )
                             }
@@ -368,6 +413,12 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onArtistClick = { artistId ->
                                         navController.navigate("artist/$artistId")
+                                    },
+                                    onAlbumPlayNext = { album ->
+                                        queueAlbumFromList(album, true)
+                                    },
+                                    onAlbumAddToQueue = { album ->
+                                        queueAlbumFromList(album, false)
                                     }
                                 )
                             }
@@ -444,6 +495,12 @@ class MainActivity : ComponentActivity() {
                                     bottomContentPadding = bottomSafePadding,
                                     onAlbumClick = { id ->
                                         navController.navigate("album/$id")
+                                    },
+                                    onAlbumPlayNext = { album ->
+                                        queueAlbumFromList(album, true)
+                                    },
+                                    onAlbumAddToQueue = { album ->
+                                        queueAlbumFromList(album, false)
                                     },
                                     onBackClick = {
                                         navController.popBackStack()

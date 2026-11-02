@@ -15,7 +15,8 @@ VP is a native Android client for [Navidrome](https://www.navidrome.org/) music 
 - **Navidrome Integration** — Browse and stream your entire music library
 - **Offline-First** — Cache albums for playback without network
 - **Background Playback** — Full Media3/ExoPlayer support with notification controls
-- **Queue Management** — Hold track to append, clicking track queues whole album
+- **Queue Management** — Album queue actions, explicit remove, drag reorder, and hold-track append
+- **Search History** — Recent queries persisted per device with quick reuse and removal
 
 ---
 
@@ -24,18 +25,33 @@ VP is a native Android client for [Navidrome](https://www.navidrome.org/) music 
 ### Player Screen
 - **Play/Pause, Next/Previous** - Standard transport controls
 - **Seek Bar** - Scrub through tracks with haptic feedback
+- **Swipe Down** - Close the player
 - **Queue Button** - Opens full queue management
 - **Song name** - Opens album
 - **Artist name** - Opens artist
 
+### Mini Player
+- **Tap** - Open the full player
+- **Swipe Left/Right** - Skip to next/previous track
+
+### Album Cards
+- **Single tap** - Open the album.
+- **Double tap** - Play the entire album next.
+- **Long press** - Add the entire album to the queue.
+- Available on Home, Albums, Artist, Search, and Cached Albums cards.
+
 ### Album Screen
 - **Download button/checkmark** - Click to download into offline library. Hold to recache or remove.
-- **Track entry** - Click to replace queue with album and play from that track. Hold to append track into current queue.
+- **Track entry** - Single tap replaces the queue with the album and plays from that track. Double tap queues the track next. Hold to append it to the current queue.
 
 ### Queue Screen
-- **Now Playing** — Highlighted
-- **Swipe to Remove** — Dismiss individual tracks
-- **Clear Queue** — One-tap reset
+- **Now Playing** — Highlighted and protected from removal
+- **Remove button** — Delete any other track
+- **Drag handle** — Long-press and drag to reorder, with auto-scroll
+- **Clear Queue** — Keep only the current track
+
+### Search
+- **Recent searches** — Persisted per device; tap to reuse, remove individual entries, or clear all.
 
 ---
 

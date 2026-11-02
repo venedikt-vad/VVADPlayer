@@ -390,6 +390,8 @@ class NavidromeManager(
         return@withContext emptyList()
     }
 
+    private fun normalizeDiscNumber(value: Int): Int = if (value > 0) value else 1
+
     private suspend fun parseAlbumList(jsonArray: JSONArray): List<Album> {
         val albumsList = mutableListOf<Album>()
         val smallSize = credentialsManager.getCoverSizeSmall()
@@ -566,7 +568,12 @@ class NavidromeManager(
                     title = songJson.optString("title"),
                     artists = trackArtists,
                     number = songJson.optInt("trackNumber", songJson.optInt("track_number", i + 1)),
-                    discNumber = songJson.optInt("discNumber", songJson.optInt("disc_number", 1)),
+                    discNumber = normalizeDiscNumber(
+                        songJson.optInt(
+                            "discNumber",
+                            songJson.optInt("disc_number", songJson.optInt("disc", 1))
+                        )
+                    ),
                     duration = songJson.optInt("duration", 0)
                 )
             )
@@ -685,7 +692,8 @@ class NavidromeManager(
                     artistId = json.optString("albumArtistId", json.optString("artistId")),
                     coverArtUrl = getCoverArtUrl(json.optString("id"), smallSize),
                     year = json.optInt("maxYear", json.optInt("year")),
-                    type = if (json.optBoolean("compilation", false)) "compilation" else "album"
+                    type = if (json.optBoolean("compilation", false)) "compilation" else "album",
+                    songCount = json.optInt("songCount").takeIf { it > 0 }
                 )
             )
         }
@@ -901,7 +909,12 @@ class NavidromeManager(
                     title = songJson.optString("title"),
                     artists = trackArtists,
                     number = songJson.optInt("trackNumber", songJson.optInt("track_number", songJson.optInt("number", i + 1))),
-                    discNumber = songJson.optInt("discNumber", songJson.optInt("disc_number", 1)),
+                    discNumber = normalizeDiscNumber(
+                        songJson.optInt(
+                            "discNumber",
+                            songJson.optInt("disc_number", songJson.optInt("disc", 1))
+                        )
+                    ),
                     duration = songJson.optInt("duration", 0)  // usually in seconds
                 )
             )

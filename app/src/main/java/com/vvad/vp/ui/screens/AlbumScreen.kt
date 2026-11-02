@@ -12,6 +12,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -32,8 +33,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -48,6 +53,8 @@ import com.vvad.vp.data.PlaybackManager
 import com.vvad.vp.ui.models.AlbumDetails
 import com.vvad.vp.ui.models.Track
 import kotlinx.coroutines.launch
+
+private fun normalizeDiscNumber(discNumber: Int): Int = if (discNumber > 0) discNumber else 1
 
 @Composable
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
@@ -77,6 +84,7 @@ fun AlbumScreen(
     val scope = rememberCoroutineScope()
     val isNetworkAvailable by rememberNetworkAvailability()
     val context = LocalContext.current
+    val hapticFeedback = LocalHapticFeedback.current
     val queueState by DownloadManager.queueState.collectAsState()
     val isDownloading = queueState.activeJob?.albumId == albumId || queueState.queue.any { it.albumId == albumId }
 
@@ -124,9 +132,23 @@ fun AlbumScreen(
     }
 
     album?.let { details ->
-        val trackIndexById = remember(details.tracks) {
-            details.tracks.mapIndexed { index, track -> track.id to index }.toMap()
+        val orderedTracks = remember(details.tracks) {
+            details.tracks.sortedWith(
+                compareBy<Track> { normalizeDiscNumber(it.discNumber) }
+                    .thenBy { it.number }
+            )
         }
+        val trackIndexById = remember(orderedTracks) {
+            orderedTracks.mapIndexed { index, track -> track.id to index }.toMap()
+        }
+        val latestDetails by rememberUpdatedState(details)
+        val latestOrderedTracks by rememberUpdatedState(orderedTracks)
+        val latestTrackIndexById by rememberUpdatedState(trackIndexById)
+        val latestCurrentTrackId by rememberUpdatedState(currentTrackId)
+        val latestOnCurrentTrackClick by rememberUpdatedState(onCurrentTrackClick)
+        val latestOnTrackClick by rememberUpdatedState(onTrackClick)
+        val latestOnTrackDoubleClick by rememberUpdatedState(onTrackDoubleClick)
+        val latestOnTrackLongClick by rememberUpdatedState(onTrackLongClick)
 
         Box(modifier = Modifier.fillMaxSize()) {
             AsyncImage(
@@ -302,7 +324,11 @@ fun AlbumScreen(
                         Text(
                             text = details.name,
                             style = MaterialTheme.typography.headlineMedium,
-                            color = Color.White
+                            color = Color.White,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
                         )
 
                         FlowRow(
@@ -343,12 +369,13 @@ fun AlbumScreen(
                         Spacer(modifier = Modifier.height(16.dp))
                     }
 
-                    val grouped = details.tracks.groupBy { it.discNumber }
+                    val grouped = orderedTracks.groupBy { normalizeDiscNumber(it.discNumber) }
+                    val discCount = grouped.size
                     grouped.forEach { (disc, tracks) ->
-                        if (grouped.size > 1) {
+                        if (discCount > 1) {
                             item {
                                 Text(
-                                    text = "Disc $disc",
+                                    text = "Disc $disc of $discCount",
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(16.dp, 8.dp),
@@ -367,39 +394,43 @@ fun AlbumScreen(
                                 flashTrigger = flashCounts[track.id] ?: 0,
                                 playbackManager = playbackManager,
                                 modifier = if (isTrackEnabled) {
-                                    Modifier.combinedClickable(
-                                        onClick = {
-                                            if (track.id == currentTrackId) {
-                                                onCurrentTrackClick()
-                                            } else {
-                                                onTrackClick(
-                                                    details.tracks,
-                                                    trackIndexById[track.id] ?: 0,
-                                                    details.id,
-                                                    details.name,
-                                                    details.coverArtUrl
+                                    Modifier.pointerInput(track.id) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                if (track.id == latestCurrentTrackId) {
+                                                    latestOnCurrentTrackClick()
+                                                } else {
+                                                    latestOnTrackClick(
+                                                        latestOrderedTracks,
+                                                        latestTrackIndexById[track.id] ?: 0,
+                                                        latestDetails.id,
+                                                        latestDetails.name,
+                                                        latestDetails.coverArtUrl
+                                                    )
+                                                }
+                                            },
+                                            onDoubleTap = {
+                                                flashCounts[track.id] = (flashCounts[track.id] ?: 0) + 1
+                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                latestOnTrackDoubleClick(
+                                                    track,
+                                                    latestDetails.id,
+                                                    latestDetails.name,
+                                                    latestDetails.coverArtUrl
+                                                )
+                                            },
+                                            onLongPress = {
+                                                flashCounts[track.id] = (flashCounts[track.id] ?: 0) + 1
+                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                latestOnTrackLongClick(
+                                                    track,
+                                                    latestDetails.id,
+                                                    latestDetails.name,
+                                                    latestDetails.coverArtUrl
                                                 )
                                             }
-                                        },
-                                        onDoubleClick = {
-                                            flashCounts[track.id] = (flashCounts[track.id] ?: 0) + 1
-                                            onTrackDoubleClick(
-                                                track,
-                                                details.id,
-                                                details.name,
-                                                details.coverArtUrl
-                                            )
-                                        },
-                                        onLongClick = {
-                                            flashCounts[track.id] = (flashCounts[track.id] ?: 0) + 1
-                                            onTrackLongClick(
-                                                track,
-                                                details.id,
-                                                details.name,
-                                                details.coverArtUrl
-                                            )
-                                        }
-                                    )
+                                        )
+                                    }
                                 } else {
                                     Modifier
                                 }

@@ -8,6 +8,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -28,7 +30,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material3.CircularProgressIndicator
@@ -52,14 +56,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import android.content.Context
 import androidx.compose.ui.text.style.TextAlign
 import coil.compose.AsyncImage
+import org.json.JSONArray
 import com.vvad.vp.data.NavidromeManager
+import com.vvad.vp.ui.components.albumCardGestures
 import com.vvad.vp.ui.models.Album
 import com.vvad.vp.ui.models.SongSearchResult
 
@@ -80,19 +88,75 @@ private enum class ArtistSortOption(val label: String) {
     NAME("Name")
 }
 
+private const val SEARCH_HISTORY_PREFS = "search_prefs"
+private const val SEARCH_HISTORY_KEY = "recent_searches"
+private const val MAX_SEARCH_HISTORY = 10
+
+private fun readSearchHistory(context: Context): List<String> {
+    val raw = context.getSharedPreferences(SEARCH_HISTORY_PREFS, Context.MODE_PRIVATE)
+        .getString(SEARCH_HISTORY_KEY, null) ?: return emptyList()
+    return runCatching {
+        val array = JSONArray(raw)
+        buildList {
+            for (index in 0 until array.length()) {
+                array.optString(index).trim().takeIf { it.isNotBlank() }?.let(::add)
+            }
+        }.distinctBy { it.lowercase() }.take(MAX_SEARCH_HISTORY)
+    }.getOrDefault(emptyList())
+}
+
+private fun writeSearchHistory(context: Context, history: List<String>) {
+    context.getSharedPreferences(SEARCH_HISTORY_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putString(SEARCH_HISTORY_KEY, JSONArray(history).toString())
+        .apply()
+}
+
+private fun addToSearchHistory(context: Context, query: String): List<String> {
+    val trimmed = query.trim()
+    if (trimmed.isBlank()) return readSearchHistory(context)
+
+    val updated = (listOf(trimmed) + readSearchHistory(context).filterNot {
+        it.equals(trimmed, ignoreCase = true)
+    }).take(MAX_SEARCH_HISTORY)
+    writeSearchHistory(context, updated)
+    return updated
+}
+
+private fun removeFromSearchHistory(context: Context, query: String): List<String> {
+    val updated = readSearchHistory(context).filterNot { it.equals(query, ignoreCase = true) }
+    writeSearchHistory(context, updated)
+    return updated
+}
+
+private fun clearSearchHistory(context: Context) {
+    writeSearchHistory(context, emptyList())
+}
+
 @Composable
 fun SearchScreen(
     navidromeManager: NavidromeManager,
     topContentPadding: Dp = 0.dp,
     bottomContentPadding: Dp = 0.dp,
     onAlbumClick: (String) -> Unit,
-    onArtistClick: (String) -> Unit
+    onArtistClick: (String) -> Unit,
+    onAlbumPlayNext: (Album) -> Unit,
+    onAlbumAddToQueue: (Album) -> Unit
 ) {
     var query by remember { mutableStateOf("") }
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var artists by remember { mutableStateOf<List<Album>>(emptyList()) }
     var songs by remember { mutableStateOf<List<SongSearchResult>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+    var recentSearches by remember { mutableStateOf(readSearchHistory(context)) }
+    val recordSearch: () -> Unit = {
+        val trimmed = query.trim()
+        if (trimmed.isNotBlank()) {
+            recentSearches = addToSearchHistory(context, trimmed)
+        }
+    }
 
     LaunchedEffect(query) {
         val trimmed = query.trim()
@@ -150,7 +214,14 @@ fun SearchScreen(
             },
             placeholder = {
                 Text("Search albums, artists, and songs")
-            }
+            },
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+            keyboardActions = KeyboardActions(
+                onSearch = {
+                    recordSearch()
+                    keyboardController?.hide()
+                }
+            )
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -163,12 +234,85 @@ fun SearchScreen(
             }
 
             trimmedQuery.isBlank() -> {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        text = "Type to search your library",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                if (recentSearches.isEmpty()) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "Type to search your library",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        item {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Recent searches",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                TextButton(
+                                    onClick = {
+                                        clearSearchHistory(context)
+                                        recentSearches = emptyList()
+                                    }
+                                ) {
+                                    Text("Clear")
+                                }
+                            }
+                        }
+                        items(recentSearches, key = { "recent-${it.lowercase()}" }) { entry ->
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        query = entry
+                                        keyboardController?.hide()
+                                        recentSearches = addToSearchHistory(context, entry)
+                                    }
+                                    .padding(horizontal = 4.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.History,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    text = entry,
+                                    modifier = Modifier.weight(1f),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                IconButton(
+                                    onClick = {
+                                        recentSearches = removeFromSearchHistory(context, entry)
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Remove $entry",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -197,7 +341,10 @@ fun SearchScreen(
                                 items(filteredArtists, key = { "artist-${it.id}" }) { artist ->
                                     ArtistTile(
                                         artist = artist,
-                                        onClick = { onArtistClick(artist.artistId) }
+                                        onClick = {
+                                            recordSearch()
+                                            onArtistClick(artist.artistId)
+                                        }
                                     )
                                 }
                             }
@@ -211,8 +358,16 @@ fun SearchScreen(
                         items(filteredAlbums, key = { "album-${it.id}" }) { album ->
                             LibraryAlbumRow(
                                 album = album,
-                                onAlbumClick = { onAlbumClick(album.id) },
-                                onArtistClick = { onArtistClick(album.artistId) }
+                                onAlbumClick = {
+                                    recordSearch()
+                                    onAlbumClick(album.id)
+                                },
+                                onArtistClick = {
+                                    recordSearch()
+                                    onArtistClick(album.artistId)
+                                },
+                                onPlayNext = { onAlbumPlayNext(album) },
+                                onAddToQueue = { onAlbumAddToQueue(album) }
                             )
                         }
                     }
@@ -224,9 +379,18 @@ fun SearchScreen(
                         items(filteredSongs, key = { "song-${it.id}" }) { song ->
                             SearchSongRow(
                                 song = song,
-                                onSongClick = { onAlbumClick(song.albumId) },
-                                onArtistClick = { onArtistClick(song.artistId) },
-                                onAlbumClick = { onAlbumClick(song.albumId) }
+                                onSongClick = {
+                                    recordSearch()
+                                    onAlbumClick(song.albumId)
+                                },
+                                onArtistClick = {
+                                    recordSearch()
+                                    onArtistClick(song.artistId)
+                                },
+                                onAlbumClick = {
+                                    recordSearch()
+                                    onAlbumClick(song.albumId)
+                                }
                             )
                         }
                     }
@@ -242,7 +406,9 @@ fun AlbumsScreen(
     topContentPadding: Dp = 0.dp,
     bottomContentPadding: Dp = 0.dp,
     onAlbumClick: (String) -> Unit,
-    onArtistClick: (String) -> Unit
+    onArtistClick: (String) -> Unit,
+    onAlbumPlayNext: (Album) -> Unit,
+    onAlbumAddToQueue: (Album) -> Unit
 ) {
     val context = LocalContext.current
     val prefs = remember { context.getSharedPreferences("library_prefs", Context.MODE_PRIVATE) }
@@ -338,7 +504,9 @@ fun AlbumsScreen(
                             LibraryAlbumGridTile(
                                 album = album,
                                 onAlbumClick = { onAlbumClick(album.id) },
-                                onArtistClick = { onArtistClick(album.artistId) }
+                                onArtistClick = { onArtistClick(album.artistId) },
+                                onPlayNext = { onAlbumPlayNext(album) },
+                                onAddToQueue = { onAlbumAddToQueue(album) }
                             )
                         }
                     }
@@ -353,7 +521,9 @@ fun AlbumsScreen(
                             LibraryAlbumRow(
                                 album = album,
                                 onAlbumClick = { onAlbumClick(album.id) },
-                                onArtistClick = { onArtistClick(album.artistId) }
+                                onArtistClick = { onArtistClick(album.artistId) },
+                                onPlayNext = { onAlbumPlayNext(album) },
+                                onAddToQueue = { onAlbumAddToQueue(album) }
                             )
                         }
                     }
@@ -603,7 +773,9 @@ private fun SortBar(
 private fun LibraryAlbumGridTile(
     album: Album,
     onAlbumClick: () -> Unit,
-    onArtistClick: () -> Unit
+    onArtistClick: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit
 ) {
     Column(
         modifier = Modifier.fillMaxWidth()
@@ -615,7 +787,12 @@ private fun LibraryAlbumGridTile(
                 .fillMaxWidth()
                 .aspectRatio(1f)
                 .clip(RoundedCornerShape(8.dp))
-                .clickable { onAlbumClick() },
+                .albumCardGestures(
+                    albumId = album.id,
+                    onOpen = onAlbumClick,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue
+                ),
             contentScale = ContentScale.Crop
         )
 
@@ -691,7 +868,9 @@ private fun SectionTitle(text: String) {
 private fun LibraryAlbumRow(
     album: Album,
     onAlbumClick: () -> Unit,
-    onArtistClick: () -> Unit
+    onArtistClick: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -704,7 +883,13 @@ private fun LibraryAlbumRow(
             contentDescription = album.name,
             modifier = Modifier
                 .size(64.dp)
-                .clip(RoundedCornerShape(8.dp)),
+                .clip(RoundedCornerShape(8.dp))
+                .albumCardGestures(
+                    albumId = album.id,
+                    onOpen = onAlbumClick,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue
+                ),
             contentScale = ContentScale.Crop
         )
 
@@ -747,7 +932,7 @@ private fun LibraryArtistRow(
             contentDescription = artist.name,
             modifier = Modifier
                 .size(64.dp)
-                .clip(CircleShape),
+                .clip(RoundedCornerShape(8.dp)),
             contentScale = ContentScale.Crop
         )
 

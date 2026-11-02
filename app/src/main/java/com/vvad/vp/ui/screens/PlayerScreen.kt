@@ -1,9 +1,14 @@
 package com.vvad.vp.ui.screens
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -17,7 +22,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
@@ -44,6 +52,19 @@ fun PlayerScreen(
     val currentAlbumId = playbackManager.currentAlbumId
     val interactionSource = remember { MutableInteractionSource() }
 
+    val dismissThresholdPx = with(LocalDensity.current) { 120.dp.toPx() }
+    var dragOffsetTarget by remember { mutableFloatStateOf(0f) }
+    var isPlayerDragging by remember { mutableStateOf(false) }
+    val playerDragOffset by animateFloatAsState(
+        targetValue = dragOffsetTarget,
+        animationSpec = if (isPlayerDragging) {
+            snap()
+        } else {
+            spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+        },
+        label = "playerScreenDragOffset"
+    )
+
     // Local state to hold the slider position during dragging
     var sliderPosition by remember(track.id) { mutableFloatStateOf(0f) }
     var isDragging by remember(track.id) { mutableStateOf(false) }
@@ -69,11 +90,36 @@ fun PlayerScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .graphicsLayer { translationY = playerDragOffset }
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = {}
             )
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = {
+                        isPlayerDragging = true
+                        dragOffsetTarget = 0f
+                    },
+                    onVerticalDrag = { change, dragAmount ->
+                        change.consume()
+                        dragOffsetTarget = (dragOffsetTarget + dragAmount).coerceAtLeast(0f)
+                    },
+                    onDragEnd = {
+                        isPlayerDragging = false
+                        if (dragOffsetTarget > dismissThresholdPx) {
+                            onClose()
+                        } else {
+                            dragOffsetTarget = 0f
+                        }
+                    },
+                    onDragCancel = {
+                        isPlayerDragging = false
+                        dragOffsetTarget = 0f
+                    }
+                )
+            }
     ) {
         // 1. Blurred Background
         AsyncImage(

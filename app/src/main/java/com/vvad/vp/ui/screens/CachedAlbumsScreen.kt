@@ -29,6 +29,7 @@ import com.vvad.vp.data.DownloadJobState
 import com.vvad.vp.data.DownloadManager
 import com.vvad.vp.data.DownloadService
 import com.vvad.vp.data.OfflineLibraryManager
+import com.vvad.vp.ui.components.albumCardGestures
 import com.vvad.vp.ui.models.Album
 import kotlinx.coroutines.launch
 
@@ -38,7 +39,9 @@ fun CachedAlbumsScreen(
     topContentPadding: Dp = 0.dp,
     bottomContentPadding: Dp = 0.dp,
     onBack: () -> Unit,
-    onAlbumClick: (String) -> Unit
+    onAlbumClick: (String) -> Unit,
+    onAlbumPlayNext: (Album) -> Unit,
+    onAlbumAddToQueue: (Album) -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -142,7 +145,13 @@ fun CachedAlbumsScreen(
                                 contentDescription = album.name,
                                 modifier = Modifier
                                     .size(48.dp)
-                                    .clip(RoundedCornerShape(4.dp)),
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .albumCardGestures(
+                                        albumId = album.id,
+                                        onOpen = { onAlbumClick(album.id) },
+                                        onPlayNext = { onAlbumPlayNext(album) },
+                                        onAddToQueue = { onAlbumAddToQueue(album) }
+                                    ),
                                 contentScale = ContentScale.Crop
                             )
 

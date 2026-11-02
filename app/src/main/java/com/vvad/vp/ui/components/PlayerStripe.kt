@@ -1,7 +1,12 @@
 package com.vvad.vp.ui.components
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.PlayArrow
@@ -13,6 +18,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.vvad.vp.data.PlaybackManager
@@ -32,6 +42,23 @@ fun PlayerStripe(
     val progress = if (duration > 0L) {
         (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
     } else 0f
+
+    val density = LocalDensity.current
+    val hapticFeedback = LocalHapticFeedback.current
+    val skipThresholdPx = with(density) { 72.dp.toPx() }
+    val canSkip = playbackManager.queue.size > 1
+
+    var dragOffsetTarget by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    val dragOffset by animateFloatAsState(
+        targetValue = dragOffsetTarget,
+        animationSpec = if (isDragging) {
+            snap()
+        } else {
+            spring(dampingRatio = 0.75f, stiffness = Spring.StiffnessMediumLow)
+        },
+        label = "playerStripeDragOffset"
+    )
 
     Surface(
         tonalElevation = 8.dp,
@@ -70,33 +97,69 @@ fun PlayerStripe(
                     .fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Album Art
-                AsyncImage(
-                    model = playbackManager.currentCoverArtUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(MaterialTheme.shapes.small)
-                )
-
-                // Track Info
-                Column(
+                Row(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(horizontal = 14.dp)
+                        .graphicsLayer { translationX = dragOffset }
+                        .pointerInput(canSkip) {
+                            detectHorizontalDragGestures(
+                                onDragStart = {
+                                    isDragging = true
+                                    dragOffsetTarget = 0f
+                                },
+                                onHorizontalDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffsetTarget = (dragOffsetTarget + dragAmount)
+                                        .coerceIn(-skipThresholdPx * 1.5f, skipThresholdPx * 1.5f)
+                                },
+                                onDragEnd = {
+                                    isDragging = false
+                                    val result = dragOffsetTarget
+                                    dragOffsetTarget = 0f
+                                    if (canSkip && result <= -skipThresholdPx) {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        playbackManager.next()
+                                    } else if (canSkip && result >= skipThresholdPx) {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        playbackManager.previous()
+                                    }
+                                },
+                                onDragCancel = {
+                                    isDragging = false
+                                    dragOffsetTarget = 0f
+                                }
+                            )
+                        },
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = track.title,
-                        style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 1,
-                        color = Color.White
+                    // Album Art
+                    AsyncImage(
+                        model = playbackManager.currentCoverArtUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(52.dp)
+                            .clip(MaterialTheme.shapes.small)
                     )
-                    Text(
-                        text = playbackManager.currentAlbumName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.LightGray,
-                        maxLines = 1
-                    )
+
+                    // Track Info
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(horizontal = 14.dp)
+                    ) {
+                        Text(
+                            text = track.title,
+                            style = MaterialTheme.typography.bodyMedium,
+                            maxLines = 1,
+                            color = Color.White
+                        )
+                        Text(
+                            text = playbackManager.currentAlbumName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.LightGray,
+                            maxLines = 1
+                        )
+                    }
                 }
 
                 // Play/Pause Button

@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.vvad.vp.data.NavidromeManager
+import com.vvad.vp.ui.components.albumCardGestures
 import com.vvad.vp.ui.models.Album
 import com.vvad.vp.ui.models.ArtistDetails
 
@@ -39,6 +40,8 @@ fun ArtistScreen(
     topContentPadding: Dp = 0.dp,
     bottomContentPadding: Dp = 0.dp,
     onAlbumClick: (String) -> Unit,
+    onAlbumPlayNext: (Album) -> Unit,
+    onAlbumAddToQueue: (Album) -> Unit,
     onBackClick: () -> Unit
 ) {
     var artistDetails by remember { mutableStateOf<ArtistDetails?>(null) }
@@ -50,7 +53,8 @@ fun ArtistScreen(
     }
 
     fun isSingleOrEP(album: Album): Boolean {
-        return album.type != "album" ||
+        return album.songCount == 1 ||
+                album.type != "album" ||
                 album.name.contains("Single", ignoreCase = true) ||
                 album.name.contains("EP", ignoreCase = true) ||
                 album.name.contains(" - Single", ignoreCase = true)
@@ -202,7 +206,12 @@ fun ArtistScreen(
                         }
                     } else {
                         items(filteredAlbums) { album ->
-                            AlbumGridItem(album = album, onClick = { onAlbumClick(album.id) })
+                            AlbumGridItem(
+                                album = album,
+                                onClick = { onAlbumClick(album.id) },
+                                onPlayNext = { onAlbumPlayNext(album) },
+                                onAddToQueue = { onAlbumAddToQueue(album) }
+                            )
                         }
                     }
                 }
@@ -215,11 +224,14 @@ fun ArtistScreen(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun AlbumGridItem(album: Album, onClick: () -> Unit) {
+fun AlbumGridItem(
+    album: Album,
+    onClick: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit
+) {
     Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         AsyncImage(
@@ -228,7 +240,13 @@ fun AlbumGridItem(album: Album, onClick: () -> Unit) {
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(1f)
-                .clip(RoundedCornerShape(8.dp)),
+                .clip(RoundedCornerShape(8.dp))
+                .albumCardGestures(
+                    albumId = album.id,
+                    onOpen = onClick,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue
+                ),
             contentScale = ContentScale.Crop
         )
         Spacer(modifier = Modifier.height(8.dp))
@@ -244,6 +262,7 @@ fun AlbumGridItem(album: Album, onClick: () -> Unit) {
                     iterations = Int.MAX_VALUE,
                     delayMillis = 2000
                 )
+                .clickable(onClick = onClick)
         )
 
         album.year?.let { year ->

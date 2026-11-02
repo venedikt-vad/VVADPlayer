@@ -33,6 +33,7 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
+import com.vvad.vp.ui.components.albumCardGestures
 import com.vvad.vp.ui.models.Album
 import kotlinx.coroutines.delay
 
@@ -47,7 +48,9 @@ fun HomeScreen(
     topContentPadding: Dp = 0.dp,
     bottomContentPadding: Dp = 0.dp,
     onAlbumClick: (String) -> Unit,
-    onArtistClick: (String) -> Unit
+    onArtistClick: (String) -> Unit,
+    onAlbumPlayNext: (Album) -> Unit,
+    onAlbumAddToQueue: (Album) -> Unit
 ) {
     var randomAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var offlineAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
@@ -122,7 +125,9 @@ fun HomeScreen(
                         onAlbumClick = { onAlbumClick(album.id) },
                         onArtistClick = {
                             if (album.artistId.isNotBlank()) onArtistClick(album.artistId)
-                        }
+                        },
+                        onPlayNext = { onAlbumPlayNext(album) },
+                        onAddToQueue = { onAlbumAddToQueue(album) }
                     )
                 }
             }
@@ -138,19 +143,41 @@ fun HomeScreen(
                                 onAlbumClick = { onAlbumClick(album.id) },
                                 onArtistClick = {
                                     if (album.artistId.isNotBlank()) onArtistClick(album.artistId)
-                                }
+                                },
+                                onPlayNext = { onAlbumPlayNext(album) },
+                                onAddToQueue = { onAlbumAddToQueue(album) }
                             )
                         }
                     }
                 }
             }
 
-            randomAlbumsSection(randomAlbums, onAlbumClick, onArtistClick)
+            randomAlbumsSection(
+                randomAlbums,
+                onAlbumClick,
+                onArtistClick,
+                onAlbumPlayNext,
+                onAlbumAddToQueue
+            )
             if (recentlyPlayed.isNotEmpty()) {
-                section("Recently Played", recentlyPlayed, onAlbumClick, onArtistClick)
+                section(
+                    "Recently Played",
+                    recentlyPlayed,
+                    onAlbumClick,
+                    onArtistClick,
+                    onAlbumPlayNext,
+                    onAlbumAddToQueue
+                )
             }
             if (mostPlayedAlbums.isNotEmpty()) {
-                section("Most Played Albums", mostPlayedAlbums, onAlbumClick, onArtistClick)
+                section(
+                    "Most Played Albums",
+                    mostPlayedAlbums,
+                    onAlbumClick,
+                    onArtistClick,
+                    onAlbumPlayNext,
+                    onAlbumAddToQueue
+                )
             }
             if (mostPlayedArtists.isNotEmpty()) {
                 artistsSection(mostPlayedArtists, onArtistClick)
@@ -164,7 +191,9 @@ fun HomeScreen(
 private fun LazyListScope.randomAlbumsSection(
     albums: List<Album>,
     onAlbumClick: (String) -> Unit,
-    onArtistClick: (String) -> Unit
+    onArtistClick: (String) -> Unit,
+    onAlbumPlayNext: (Album) -> Unit,
+    onAlbumAddToQueue: (Album) -> Unit
 ) {
     item { Text("Random Albums", style = MaterialTheme.typography.titleLarge) }
     item {
@@ -173,7 +202,9 @@ private fun LazyListScope.randomAlbumsSection(
                 AlbumTile(
                     album = album,
                     onAlbumClick = { onAlbumClick(album.id) },
-                    onArtistClick = { onArtistClick(album.artistId) }
+                    onArtistClick = { onArtistClick(album.artistId) },
+                    onPlayNext = { onAlbumPlayNext(album) },
+                    onAddToQueue = { onAlbumAddToQueue(album) }
                 )
             }
         }
@@ -184,7 +215,9 @@ private fun LazyListScope.section(
     title: String,
     albums: List<Album>,
     onAlbumClick: (String) -> Unit,
-    onArtistClick: (String) -> Unit
+    onArtistClick: (String) -> Unit,
+    onAlbumPlayNext: (Album) -> Unit,
+    onAlbumAddToQueue: (Album) -> Unit
 ) {
     item { Text(title, style = MaterialTheme.typography.titleLarge) }
     item {
@@ -193,7 +226,9 @@ private fun LazyListScope.section(
                 AlbumTile(
                     album = album,
                     onAlbumClick = { onAlbumClick(album.id) },
-                    onArtistClick = { onArtistClick(album.artistId) }
+                    onArtistClick = { onArtistClick(album.artistId) },
+                    onPlayNext = { onAlbumPlayNext(album) },
+                    onAddToQueue = { onAlbumAddToQueue(album) }
                 )
             }
         }
@@ -272,7 +307,9 @@ private fun Context.isNetworkAvailable(): Boolean {
 fun AlbumTile(
     album: Album,
     onAlbumClick: () -> Unit,
-    onArtistClick: () -> Unit
+    onArtistClick: () -> Unit,
+    onPlayNext: () -> Unit,
+    onAddToQueue: () -> Unit
 ) {
     var imageState by remember { mutableStateOf<AsyncImagePainter.State>(AsyncImagePainter.State.Empty) }
 
@@ -290,7 +327,12 @@ fun AlbumTile(
             modifier = Modifier
                 .size(130.dp)
                 .clip(RoundedCornerShape(3.dp))
-                .clickable { onAlbumClick() }
+                .albumCardGestures(
+                    albumId = album.id,
+                    onOpen = onAlbumClick,
+                    onPlayNext = onPlayNext,
+                    onAddToQueue = onAddToQueue
+                )
         ) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
