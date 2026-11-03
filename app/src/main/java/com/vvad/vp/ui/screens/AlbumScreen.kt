@@ -33,11 +33,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -50,6 +48,7 @@ import com.vvad.vp.data.DownloadService
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.data.PlaybackManager
+import com.vvad.vp.ui.components.LocalAppHaptics
 import com.vvad.vp.ui.models.AlbumDetails
 import com.vvad.vp.ui.models.Track
 import kotlinx.coroutines.launch
@@ -84,7 +83,7 @@ fun AlbumScreen(
     val scope = rememberCoroutineScope()
     val isNetworkAvailable by rememberNetworkAvailability()
     val context = LocalContext.current
-    val hapticFeedback = LocalHapticFeedback.current
+    val haptics = LocalAppHaptics.current
     val queueState by DownloadManager.queueState.collectAsState()
     val isDownloading = queueState.activeJob?.albumId == albumId || queueState.queue.any { it.albumId == albumId }
 
@@ -411,7 +410,7 @@ fun AlbumScreen(
                                             },
                                             onDoubleTap = {
                                                 flashCounts[track.id] = (flashCounts[track.id] ?: 0) + 1
-                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                haptics?.performLongPress()
                                                 latestOnTrackDoubleClick(
                                                     track,
                                                     latestDetails.id,
@@ -421,7 +420,7 @@ fun AlbumScreen(
                                             },
                                             onLongPress = {
                                                 flashCounts[track.id] = (flashCounts[track.id] ?: 0) + 1
-                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                haptics?.performLongPress()
                                                 latestOnTrackLongClick(
                                                     track,
                                                     latestDetails.id,

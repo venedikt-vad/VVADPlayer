@@ -53,6 +53,10 @@ VP is a native Android client for [Navidrome](https://www.navidrome.org/) music 
 ### Search
 - **Recent searches** — Persisted per device; tap to reuse, remove individual entries, or clear all.
 
+### Settings
+- **Categories** - Connection, Transcoding, Image Quality, Cache, and System each open their own submenu.
+- **System** - Toggle vibration feedback, choose Light/Medium/Strong intensity, or test the current setting.
+
 ---
 
 ## Screenshots

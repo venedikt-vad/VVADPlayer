@@ -43,16 +43,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import com.vvad.vp.data.PlaybackManager
+import com.vvad.vp.ui.components.LocalAppHaptics
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -73,7 +72,7 @@ fun QueueScreen(
     val currentIndex = playbackManager.currentQueueIndex
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    val haptics = LocalHapticFeedback.current
+    val haptics = LocalAppHaptics.current
     val density = LocalDensity.current
     val edgeThresholdPx = with(density) { 72.dp.toPx() }
     val fallbackRowHeightPx = with(density) { 65.dp.toPx() }
@@ -98,7 +97,7 @@ fun QueueScreen(
         val target = (draggedFromIndex + steps)
             .coerceIn(0, playbackManager.queue.lastIndex)
         if (target != draggedToIndex && draggedToIndex != -1) {
-            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            haptics?.performLongPress()
         }
         draggedToIndex = target
 
@@ -295,7 +294,7 @@ fun QueueScreen(
                                             draggedItemHeight = currentInfo?.size?.toFloat()
                                                 ?: fallbackRowHeightPx
                                             dragOffsetY = 0f
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            haptics?.performLongPress()
                                         },
                                         onDrag = { change, dragAmount ->
                                             change.consume()
@@ -311,7 +310,7 @@ fun QueueScreen(
                                         },
                                         onDragEnd = {
                                             finishDrag()
-                                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            haptics?.performLongPress()
                                         },
                                         onDragCancel = { finishDrag() }
                                     )

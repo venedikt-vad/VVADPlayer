@@ -30,6 +30,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -59,6 +60,8 @@ import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.data.PlaybackManager
 import com.vvad.vp.data.PlaybackService
+import com.vvad.vp.ui.components.AppHaptics
+import com.vvad.vp.ui.components.LocalAppHaptics
 import com.vvad.vp.ui.components.PlayerStripe
 import com.vvad.vp.ui.models.Album
 import com.vvad.vp.ui.screens.*
@@ -108,7 +111,13 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             VVADPlayerTheme {
+                val vibrationEnabled by credentialsManager.vibrationEnabled.collectAsState(initial = true)
+                val vibrationIntensity by credentialsManager.vibrationIntensity.collectAsState(initial = 2)
+                val appHaptics = remember(vibrationEnabled, vibrationIntensity) {
+                    AppHaptics(applicationContext, vibrationEnabled, vibrationIntensity)
+                }
 
+                CompositionLocalProvider(LocalAppHaptics provides appHaptics) {
                 val navController = rememberNavController()
                 val scope = rememberCoroutineScope()
                 val queueAlbumFromList: (Album, Boolean) -> Unit = { album, playNext ->
@@ -548,6 +557,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                }
                 }
             }
         }

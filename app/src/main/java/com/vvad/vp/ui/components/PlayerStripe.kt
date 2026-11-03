@@ -19,10 +19,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import com.vvad.vp.data.PlaybackManager
@@ -44,7 +42,7 @@ fun PlayerStripe(
     } else 0f
 
     val density = LocalDensity.current
-    val hapticFeedback = LocalHapticFeedback.current
+    val haptics = LocalAppHaptics.current
     val skipThresholdPx = with(density) { 72.dp.toPx() }
     val canSkip = playbackManager.queue.size > 1
 
@@ -117,10 +115,10 @@ fun PlayerStripe(
                                     val result = dragOffsetTarget
                                     dragOffsetTarget = 0f
                                     if (canSkip && result <= -skipThresholdPx) {
-                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptics?.performLongPress()
                                         playbackManager.next()
                                     } else if (canSkip && result >= skipThresholdPx) {
-                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        haptics?.performLongPress()
                                         playbackManager.previous()
                                     }
                                 },

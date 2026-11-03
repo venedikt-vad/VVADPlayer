@@ -206,11 +206,15 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 
 #### SettingsScreen (`ui/screens/SettingsScreen.kt`)
 
+- Top-level category list opens submenus: Connection, Transcoding, Image Quality, Cache, System.
+- Submenus use the in-screen back arrow and system back to return to the category list.
 - Connection test and credential save.
 - Transcoding format and max bitrate.
 - Small/large cover art sizes.
 - Navigate to cached albums.
 - Clear all cached tracks.
+- System submenu controls vibration feedback on/off, Light/Medium/Strong intensity, and a test action.
+- Vibration settings are exposed through `LocalAppHaptics` in `ui/components/AppHaptics.kt`; all app haptics respect them.
 
 #### CachedAlbumsScreen (`ui/screens/CachedAlbumsScreen.kt`)
 
@@ -373,6 +377,8 @@ Key settings:
 - Max bitrate.
 - Small and large cover sizes.
 - Cache size in MB, with `-1` representing unlimited.
+- Vibration feedback enabled flag.
+- Vibration intensity level (`1` light, `2` medium, `3` strong).
 
 Defaults:
 
@@ -381,6 +387,7 @@ Defaults:
 - Small cover: 400 px.
 - Large cover: 800 px.
 - Cache size: 512 MB.
+- Vibration feedback: enabled, medium intensity.
 
 ### OfflineLibraryManager (`data/OfflineLibraryManager.kt`)
 
@@ -534,6 +541,7 @@ Implemented:
 - Download progress notification.
 - Transcoding format/bitrate settings.
 - Cover-size and cache-management settings.
+- Category-based settings submenus with configurable vibration on/off and intensity.
 - Global search history with per-entry removal and clear-all.
 - Player bar swipe-to-skip and player screen swipe-down-to-close.
 - Data-driven one-track single detection.
@@ -569,6 +577,7 @@ Not implemented:
 | Player overlay | `ui/screens/PlayerScreen.kt` |
 | Mini player | `ui/components/PlayerStripe.kt` |
 | Album card gestures | `ui/components/AlbumCardGestures.kt` |
+| Vibration haptics | `ui/components/AppHaptics.kt` |
 | Queue | `ui/screens/QueueScreen.kt` |
 | Album detail | `ui/screens/AlbumScreen.kt` |
 | Artist detail | `ui/screens/ArtistScreen.kt` |

@@ -25,6 +25,9 @@ class CredentialsManager(private val context: Context) {
         val COVER_SIZE_LARGE = intPreferencesKey("cover_size_large")
 
         val CACHE_SIZE_MB = intPreferencesKey("cache_size_mb")
+
+        val VIBRATION_ENABLED = booleanPreferencesKey("vibration_enabled")
+        val VIBRATION_INTENSITY = intPreferencesKey("vibration_intensity")
     }
     suspend fun getRawServer(): String = server.first()
     suspend fun getUsername(): String = user.first()
@@ -89,6 +92,18 @@ class CredentialsManager(private val context: Context) {
     suspend fun saveCacheSizeMb(sizeMb: Int, unlimited: Boolean) {
         context.dataStore.edit {
             it[CACHE_SIZE_MB] = if (unlimited) -1 else sizeMb.coerceIn(100, 10000)
+        }
+    }
+
+    val vibrationEnabled: Flow<Boolean> = context.dataStore.data.map { it[VIBRATION_ENABLED] ?: true }
+    val vibrationIntensity: Flow<Int> = context.dataStore.data.map {
+        (it[VIBRATION_INTENSITY] ?: 2).coerceIn(1, 3)
+    }
+
+    suspend fun saveVibrationSettings(enabled: Boolean, intensity: Int) {
+        context.dataStore.edit {
+            it[VIBRATION_ENABLED] = enabled
+            it[VIBRATION_INTENSITY] = intensity.coerceIn(1, 3)
         }
     }
 

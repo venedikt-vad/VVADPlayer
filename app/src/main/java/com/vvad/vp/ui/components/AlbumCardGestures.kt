@@ -5,9 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
 
 @Composable
 fun Modifier.albumCardGestures(
@@ -16,7 +14,7 @@ fun Modifier.albumCardGestures(
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit
 ): Modifier {
-    val hapticFeedback = LocalHapticFeedback.current
+    val haptics = LocalAppHaptics.current
     val currentOnOpen by rememberUpdatedState(onOpen)
     val currentOnPlayNext by rememberUpdatedState(onPlayNext)
     val currentOnAddToQueue by rememberUpdatedState(onAddToQueue)
@@ -25,11 +23,11 @@ fun Modifier.albumCardGestures(
         detectTapGestures(
             onTap = { currentOnOpen() },
             onDoubleTap = {
-                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                haptics?.performLongPress()
                 currentOnPlayNext()
             },
             onLongPress = {
-                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                haptics?.performLongPress()
                 currentOnAddToQueue()
             }
         )
