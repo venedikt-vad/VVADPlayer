@@ -480,17 +480,12 @@ fun PlaylistTile(
             coverArtUrl = playlist.coverArtUrl,
             contentDescription = playlist.name,
             modifier = Modifier.size(130.dp),
-            shape = RoundedCornerShape(3.dp)
+            shape = RoundedCornerShape(3.dp),
+            seed = playlist.id,
+            centerText = playlist.name
         )
 
         Spacer(modifier = Modifier.height(8.dp))
-
-        Text(
-            text = playlist.name,
-            style = MaterialTheme.typography.bodyMedium,
-            maxLines = 1,
-            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, delayMillis = 2000)
-        )
 
         Text(
             text = playlist.songCount?.let { count ->

@@ -143,7 +143,8 @@ fun PlaylistScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .aspectRatio(1f)
-                                .padding(24.dp)
+                                .padding(24.dp),
+                            seed = details.id
                         )
 
                         Text(

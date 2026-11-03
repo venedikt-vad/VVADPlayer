@@ -1107,7 +1107,8 @@ private fun PlaylistGridTile(
             contentDescription = playlist.name,
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f)
+                .aspectRatio(1f),
+            seed = playlist.id
         )
 
         Spacer(modifier = Modifier.height(6.dp))
@@ -1143,7 +1144,8 @@ private fun PlaylistRow(
         PlaylistCover(
             coverArtUrl = playlist.coverArtUrl,
             contentDescription = playlist.name,
-            modifier = Modifier.size(64.dp)
+            modifier = Modifier.size(64.dp),
+            seed = playlist.id
         )
 
         Spacer(modifier = Modifier.size(12.dp))
