@@ -58,3 +58,24 @@ data class SongSearchResult(
     val coverArtUrl: String,
     val duration: Int
 )
+
+data class Playlist(
+    val id: String,
+    val name: String,
+    val comment: String? = null,
+    val songCount: Int? = null,
+    val duration: Int? = null,
+    val coverArtUrl: String = "",
+    val createdAt: String? = null,
+    val updatedAt: String? = null,
+    val ownerId: String? = null,
+    val public: Boolean? = null
+)
+
+data class PlaylistDetails(
+    val id: String,
+    val name: String,
+    val comment: String? = null,
+    val coverArtUrl: String = "",
+    val tracks: MutableList<Track> = mutableListOf()
+)

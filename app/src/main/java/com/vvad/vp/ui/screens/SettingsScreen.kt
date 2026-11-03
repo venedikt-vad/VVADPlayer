@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Wifi
@@ -42,6 +43,7 @@ private enum class SettingsSection(
 ) {
     CONNECTION("Connection", "Server address and account", Icons.Filled.Wifi),
     TRANSCODING("Transcoding", "Streaming format and bitrate", Icons.Filled.MusicNote),
+    PLAYLISTS("Playlists", "Home mixes name filter", Icons.Filled.QueueMusic),
     IMAGE_QUALITY("Image Quality", "Cover art resolution", Icons.Filled.Image),
     CACHE("Cache", "Offline files and local storage", Icons.Filled.Storage),
     SYSTEM("System", "Vibration feedback and app behavior", Icons.Filled.Settings)
@@ -72,6 +74,9 @@ fun SettingsScreen(
 
     val savedSmallSize by credentialsManager.coverSizeSmall.collectAsState(initial = 400)
     val savedLargeSize by credentialsManager.coverSizeLarge.collectAsState(initial = 800)
+
+    val savedPlaylistPrefix by credentialsManager.playlistPrefix.collectAsState(initial = "")
+    var playlistPrefixInput by remember { mutableStateOf<String?>(null) }
 
     val formats = listOf("raw", "mp3", "ogg", "aac")
     val bitrates = listOf(0, 128, 192, 256, 320)
@@ -274,6 +279,27 @@ fun SettingsScreen(
                             )
                         }
                     }
+                }
+
+                SettingsSection.PLAYLISTS -> {
+                    Text("Home mixes", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        text = "Playlists whose names start with this prefix appear in the \"Your mixes\" row on Home. Leave it empty to show all playlists.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    OutlinedTextField(
+                        value = playlistPrefixInput ?: savedPlaylistPrefix,
+                        onValueChange = { value ->
+                            playlistPrefixInput = value
+                            scope.launch { credentialsManager.savePlaylistPrefix(value) }
+                        },
+                        label = { Text("Playlist name prefix") },
+                        placeholder = { Text("e.g. Mix - ") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
                 }
 
                 SettingsSection.IMAGE_QUALITY -> {

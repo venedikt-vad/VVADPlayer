@@ -28,6 +28,8 @@ class CredentialsManager(private val context: Context) {
 
         val VIBRATION_ENABLED = booleanPreferencesKey("vibration_enabled")
         val VIBRATION_INTENSITY = intPreferencesKey("vibration_intensity")
+
+        val PLAYLIST_PREFIX = stringPreferencesKey("playlist_prefix")
     }
     suspend fun getRawServer(): String = server.first()
     suspend fun getUsername(): String = user.first()
@@ -116,4 +118,14 @@ class CredentialsManager(private val context: Context) {
 
     val preferredFormat: Flow<String> = context.dataStore.data.map { it[PREFERRED_FORMAT] ?: "raw" }
     val maxBitrate: Flow<Int> = context.dataStore.data.map { it[MAX_BITRATE] ?: 0 } // 0 = no limit
+
+    val playlistPrefix: Flow<String> = context.dataStore.data.map { it[PLAYLIST_PREFIX] ?: "" }
+
+    suspend fun getPlaylistPrefix(): String = playlistPrefix.first()
+
+    suspend fun savePlaylistPrefix(prefix: String) {
+        context.dataStore.edit {
+            it[PLAYLIST_PREFIX] = prefix
+        }
+    }
 }

@@ -4,6 +4,8 @@ import android.util.Log
 import com.vvad.vp.ui.models.Album
 import com.vvad.vp.ui.models.AlbumDetails
 import com.vvad.vp.ui.models.ArtistDetails
+import com.vvad.vp.ui.models.Playlist
+import com.vvad.vp.ui.models.PlaylistDetails
 import com.vvad.vp.ui.models.SongSearchResult
 import com.vvad.vp.ui.models.Track
 import com.vvad.vp.ui.models.TrackArtist
@@ -290,6 +292,82 @@ class NavidromeManager(
         return@withContext emptyList()
     }
 
+    suspend fun getPlaylists(
+        limit: Int = 500,
+        sort: String = "name",
+        order: String = "ASC"
+    ): List<Playlist> = withContext(Dispatchers.IO) {
+        if (!ensureNativeAuth()) {
+            Log.e(TAG, "Native authentication failed while fetching playlists.")
+            return@withContext emptyList()
+        }
+
+        val baseUrl = credentialsManager.getFullServerUrl()
+        try {
+            val encodedSort = URLEncoder.encode(sort, "UTF-8")
+            val url = URL("$baseUrl/api/playlist?_sort=$encodedSort&_order=$order&_end=$limit")
+            val urlConnection = url.openConnection() as HttpURLConnection
+            urlConnection.requestMethod = "GET"
+            urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
+            urlConnection.setRequestProperty("x-nd-client-unique-id", nativeClientId)
+
+            if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
+                val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
+                debugJsonPayload("NavidromeManager_Playlists", rawJson)
+                return@withContext parsePlaylistList(JSONArray(rawJson))
+            } else {
+                Log.e(TAG, "Failed to fetch playlists. Response code: ${urlConnection.responseCode}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Exception during playlists fetch", e)
+        }
+        return@withContext emptyList()
+    }
+
+    suspend fun getPlaylistsByPrefix(prefix: String, limit: Int = 12): List<Playlist> {
+        val trimmedPrefix = prefix.trim()
+        val playlists = getPlaylists(limit = 500, sort = "name", order = "ASC")
+        val matching = if (trimmedPrefix.isEmpty()) {
+            playlists
+        } else {
+            playlists.filter { it.name.startsWith(trimmedPrefix, ignoreCase = true) }
+        }
+        return matching.take(limit)
+    }
+
+    suspend fun getPlaylist(playlistId: String): PlaylistDetails? = withContext(Dispatchers.IO) {
+        // Subsonic getPlaylist exposes the playlist tracks reliably across Navidrome versions.
+        try {
+            val baseUrl = credentialsManager.getFullServerUrl()
+            val authParams = buildSubsonicAuthParams()
+            val url = "$baseUrl/rest/getPlaylist?$authParams&id=$playlistId&f=json"
+            val response = executeRequest(url, "GET")
+            if (response != null) {
+                debugJsonPayload("PlaylistDetailsRaw_$playlistId", response)
+                val playlistJson = JSONObject(response)
+                    .optJSONObject("subsonic-response")
+                    ?.optJSONObject("playlist")
+                if (playlistJson != null) {
+                    return@withContext parseSubsonicPlaylist(playlistJson)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch playlist via Subsonic: $playlistId", e)
+        }
+
+        // Fallback to the native API for servers without Subsonic playlist support.
+        try {
+            val playlistJsonStr = performNativeRequest("/api/playlist/$playlistId", "GET")
+                ?: return@withContext null
+            val playlistJson = JSONObject(playlistJsonStr)
+            debugJsonPayload("PlaylistDetailsNativeRaw_$playlistId", playlistJsonStr)
+            return@withContext parsePlaylistDetails(playlistJson)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch playlist via native API: $playlistId", e)
+        }
+        return@withContext null
+    }
+
     suspend fun searchAlbums(query: String, limit: Int = 30): List<Album> = withContext(Dispatchers.IO) {
         if (query.isBlank()) return@withContext emptyList()
         if (!ensureNativeAuth()) {
@@ -447,6 +525,137 @@ class NavidromeManager(
         return artistsList
     }
 
+    private suspend fun parsePlaylistList(jsonArray: JSONArray): List<Playlist> {
+        val playlists = mutableListOf<Playlist>()
+        val smallSize = credentialsManager.getCoverSizeSmall()
+
+        for (i in 0 until jsonArray.length()) {
+            val json = jsonArray.optJSONObject(i) ?: continue
+            val id = json.optString("id")
+            if (id.isBlank()) continue
+
+            val firstTrack = json.optJSONArray("tracks")?.optJSONObject(0)
+                ?: json.optJSONArray("songs")?.optJSONObject(0)
+            val coverArtId = json.optString("coverArtId").ifBlank {
+                json.optString("coverArt").ifBlank {
+                    firstTrack?.let { songCoverArtId(it) } ?: ""
+                }
+            }
+
+            playlists.add(
+                Playlist(
+                    id = id,
+                    name = json.optString("name"),
+                    comment = json.optString("comment").takeIf { it.isNotBlank() },
+                    songCount = json.optInt("songCount", json.optInt("song_count")).takeIf { it > 0 },
+                    duration = json.optInt("duration").takeIf { it > 0 },
+                    coverArtUrl = if (coverArtId.isNotBlank()) {
+                        getCoverArtUrl(coverArtId, smallSize)
+                    } else {
+                        ""
+                    },
+                    createdAt = json.optString("createdAt", json.optString("created_at"))
+                        .takeIf { it.isNotBlank() },
+                    updatedAt = json.optString("updatedAt", json.optString("updated_at"))
+                        .takeIf { it.isNotBlank() },
+                    ownerId = json.optString("ownerId", json.optString("owner_id"))
+                        .takeIf { it.isNotBlank() },
+                    public = if (json.has("public")) json.optBoolean("public") else null
+                )
+            )
+        }
+
+        return playlists
+    }
+
+    private suspend fun parsePlaylistDetails(json: JSONObject): PlaylistDetails {
+        val id = json.optString("id")
+        val largeSize = credentialsManager.getCoverSizeLarge()
+        val tracksArray = json.optJSONArray("tracks")
+            ?: json.optJSONArray("songs")
+            ?: JSONArray()
+
+        val tracks = parseTracks(tracksArray, sort = false)
+            .mapIndexed { index, track -> track.copy(number = index + 1) }
+
+        val firstTrack = tracksArray.optJSONObject(0)
+        val coverArtId = json.optString("coverArtId").ifBlank {
+            json.optString("coverArt").ifBlank {
+                firstTrack?.let { songCoverArtId(it) } ?: ""
+            }
+        }
+
+        return PlaylistDetails(
+            id = id,
+            name = json.optString("name"),
+            comment = json.optString("comment").takeIf { it.isNotBlank() },
+            coverArtUrl = if (coverArtId.isNotBlank()) {
+                getCoverArtUrl(coverArtId, largeSize)
+            } else {
+                ""
+            },
+            tracks = tracks.toMutableList()
+        )
+    }
+
+    private suspend fun parseSubsonicPlaylist(json: JSONObject): PlaylistDetails {
+        val largeSize = credentialsManager.getCoverSizeLarge()
+        val entries = json.optJSONArray("entry") ?: JSONArray()
+        val tracks = mutableListOf<Track>()
+
+        for (i in 0 until entries.length()) {
+            val song = entries.optJSONObject(i) ?: continue
+            val trackArtists = mutableListOf<TrackArtist>()
+            val artistName = song.optString("artist", song.optString("artistName"))
+            if (artistName.isNotEmpty()) {
+                trackArtists.add(
+                    TrackArtist(
+                        id = song.optString("artistId", song.optString("artist_id")),
+                        name = artistName
+                    )
+                )
+            }
+
+            tracks.add(
+                Track(
+                    id = song.optString("id"),
+                    title = song.optString("title"),
+                    artists = trackArtists,
+                    number = i + 1,
+                    discNumber = normalizeDiscNumber(song.optInt("discNumber", 1)),
+                    duration = song.optInt("duration", 0)
+                )
+            )
+        }
+
+        val coverArtId = json.optString("coverArt").ifBlank {
+            entries.optJSONObject(0)?.optString("coverArt") ?: ""
+        }
+
+        return PlaylistDetails(
+            id = json.optString("id"),
+            name = json.optString("name"),
+            comment = json.optString("comment").takeIf { it.isNotBlank() },
+            coverArtUrl = if (coverArtId.isNotBlank()) {
+                getCoverArtUrl(coverArtId, largeSize)
+            } else {
+                ""
+            },
+            tracks = tracks
+        )
+    }
+
+    private fun songCoverArtId(song: JSONObject): String =
+        song.optString("coverArtId").ifBlank {
+            song.optString("cover_art_id").ifBlank {
+                song.optString("coverArt").ifBlank {
+                    song.optString("albumId").ifBlank {
+                        song.optString("album_id")
+                    }
+                }
+            }
+        }
+
     /**
      * Fetches an album via Native API + separate song fetch.
      */
@@ -527,7 +736,7 @@ class NavidromeManager(
         )
     }
 
-    private fun parseTracks(songsArray: JSONArray): List<Track> {
+    private fun parseTracks(songsArray: JSONArray, sort: Boolean = true): List<Track> {
         val tracksList = mutableListOf<Track>()
 
         for (i in 0 until songsArray.length()) {
@@ -578,6 +787,8 @@ class NavidromeManager(
                 )
             )
         }
+
+        if (!sort) return tracksList
 
         // ← SORT: First by disc number, then by track number
         return tracksList.sortedWith(

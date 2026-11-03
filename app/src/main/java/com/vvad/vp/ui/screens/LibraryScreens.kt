@@ -67,8 +67,10 @@ import androidx.compose.ui.text.style.TextAlign
 import coil.compose.AsyncImage
 import org.json.JSONArray
 import com.vvad.vp.data.NavidromeManager
+import com.vvad.vp.ui.components.PlaylistCover
 import com.vvad.vp.ui.components.albumCardGestures
 import com.vvad.vp.ui.models.Album
+import com.vvad.vp.ui.models.Playlist
 import com.vvad.vp.ui.models.SongSearchResult
 
 private enum class AlbumSortOption(val label: String) {
@@ -86,6 +88,13 @@ private enum class ArtistSortOption(val label: String) {
     SONG_COUNT("Song count"),
     ALBUMS_COUNT("Albums count"),
     NAME("Name")
+}
+
+private enum class PlaylistSortOption(val label: String) {
+    NAME("Name"),
+    RECENTLY_ADDED("Recently added"),
+    SONG_COUNT("Song count"),
+    DURATION("Duration")
 }
 
 private const val SEARCH_HISTORY_PREFS = "search_prefs"
@@ -657,7 +666,138 @@ fun ArtistsScreen(
     }
 }
 
+@Composable
+fun PlaylistsScreen(
+    navidromeManager: NavidromeManager,
+    topContentPadding: Dp = 0.dp,
+    bottomContentPadding: Dp = 0.dp,
+    onPlaylistClick: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val prefs = remember { context.getSharedPreferences("library_prefs", Context.MODE_PRIVATE) }
+
+    var playlists by remember { mutableStateOf<List<Playlist>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var sortOption by remember {
+        mutableStateOf(
+            try { PlaylistSortOption.valueOf(prefs.getString("playlist_sort", "NAME") ?: "NAME") }
+            catch (_: Exception) { PlaylistSortOption.NAME }
+        )
+    }
+    var ascending by remember { mutableStateOf(prefs.getBoolean("playlist_ascending", true)) }
+    var isGrid by remember { mutableStateOf(prefs.getBoolean("playlist_grid", false)) }
+    val listState = rememberLazyListState()
+    val gridState = rememberLazyGridState()
+
+    LaunchedEffect(sortOption, ascending) {
+        isLoading = true
+        playlists = navidromeManager.getPlaylists(
+            sort = sortOption.toServerSort(),
+            order = if (ascending) "ASC" else "DESC"
+        )
+        isLoading = false
+        if (isGrid) gridState.animateScrollToItem(0)
+        else listState.animateScrollToItem(0)
+    }
+
+    LaunchedEffect(sortOption, ascending, isGrid) {
+        prefs.edit()
+            .putString("playlist_sort", sortOption.name)
+            .putBoolean("playlist_ascending", ascending)
+            .putBoolean("playlist_grid", isGrid)
+            .apply()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(
+                start = 16.dp,
+                top = topContentPadding + 12.dp,
+                end = 16.dp,
+                bottom = bottomContentPadding + 12.dp
+            )
+    ) {
+        when {
+            isLoading -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            }
+
+            playlists.isEmpty() -> {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "No playlists found",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            else -> {
+                SectionTitle("Playlists")
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                SortBar(
+                    sortLabel = sortOption.label,
+                    sortOptions = PlaylistSortOption.entries.map { it.label },
+                    onSortSelected = { index ->
+                        sortOption = PlaylistSortOption.entries[index]
+                    },
+                    ascending = ascending,
+                    onToggleAscending = { ascending = !ascending },
+                    isGrid = isGrid,
+                    onToggleLayout = { isGrid = !isGrid }
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                if (isGrid) {
+                    LazyVerticalGrid(
+                        state = gridState,
+                        columns = GridCells.Adaptive(160.dp),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(playlists, key = { it.id }) { playlist ->
+                            PlaylistGridTile(
+                                playlist = playlist,
+                                onClick = { onPlaylistClick(playlist.id) }
+                            )
+                        }
+                    }
+                } else {
+                    LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(playlists, key = { it.id }) { playlist ->
+                            PlaylistRow(
+                                playlist = playlist,
+                                onClick = { onPlaylistClick(playlist.id) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 // ==================== SORT FIELD MAPPINGS ====================
+
+private fun PlaylistSortOption.toServerSort(): String = when (this) {
+    PlaylistSortOption.NAME -> "name"
+    PlaylistSortOption.RECENTLY_ADDED -> "created_at"
+    PlaylistSortOption.SONG_COUNT -> "song_count"
+    PlaylistSortOption.DURATION -> "duration"
+}
 
 private fun AlbumSortOption.toServerSort(): String = when (this) {
     AlbumSortOption.NAME -> "name"
@@ -949,6 +1089,96 @@ private fun LibraryArtistRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Composable
+private fun PlaylistGridTile(
+    playlist: Playlist,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() }
+    ) {
+        PlaylistCover(
+            coverArtUrl = playlist.coverArtUrl,
+            contentDescription = playlist.name,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(1f)
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Text(
+            text = playlist.name,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+
+        Text(
+            text = playlistSubtitle(playlist),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun PlaylistRow(
+    playlist: Playlist,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        PlaylistCover(
+            coverArtUrl = playlist.coverArtUrl,
+            contentDescription = playlist.name,
+            modifier = Modifier.size(64.dp)
+        )
+
+        Spacer(modifier = Modifier.size(12.dp))
+
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = playlist.name,
+                style = MaterialTheme.typography.bodyLarge,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = playlistSubtitle(playlist),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+private fun playlistSubtitle(playlist: Playlist): String {
+    val songCount = playlist.songCount
+    val duration = playlist.duration
+    return buildString {
+        if (songCount != null) {
+            append(songCount)
+            append(if (songCount == 1) " song" else " songs")
+        }
+        if (duration != null && duration > 0) {
+            if (isNotEmpty()) append(" • ")
+            append(formatDuration(duration))
+        }
+        if (isEmpty()) append("Playlist")
     }
 }
 

@@ -161,7 +161,8 @@ class MainActivity : ComponentActivity() {
                 val selectedNavRoute = when {
                     currentRoute == "home" -> "home"
                     currentRoute == "search" -> "search"
-                    currentRoute == "albums" || currentRoute?.startsWith("album") == true -> "albums"
+                    currentRoute == "albums" || currentRoute?.startsWith("album/") == true -> "albums"
+                    currentRoute == "playlists" || currentRoute?.startsWith("playlist/") == true -> "playlists"
                     currentRoute == "artists" || currentRoute?.startsWith("artist") == true -> "artists"
                     else -> null
                 }
@@ -310,6 +311,19 @@ class MainActivity : ComponentActivity() {
                                             )
 
                                             NavigationBarItem(
+                                                selected = selectedNavRoute == "playlists",
+                                                onClick = {
+                                                    navigateToTopLevel("playlists")
+                                                },
+                                                icon = {
+                                                    Icon(Icons.Default.QueueMusic, contentDescription = "Playlists")
+                                                },
+                                                label = {
+                                                    Text("Playlists")
+                                                }
+                                            )
+
+                                            NavigationBarItem(
                                                 selected = selectedNavRoute == "artists",
                                                 onClick = {
                                                     navigateToTopLevel("artists")
@@ -352,6 +366,9 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onArtistClick = { artistId ->
                                         navController.navigate("artist/$artistId")
+                                    },
+                                    onPlaylistClick = { playlistId ->
+                                        navController.navigate("playlist/$playlistId")
                                     },
                                     onAlbumPlayNext = { album ->
                                         queueAlbumFromList(album, true)
@@ -428,6 +445,59 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onAlbumAddToQueue = { album ->
                                         queueAlbumFromList(album, false)
+                                    }
+                                )
+                            }
+
+                            composable("playlists") {
+                                PlaylistsScreen(
+                                    navidromeManager = navidromeManager,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding,
+                                    onPlaylistClick = { playlistId ->
+                                        navController.navigate("playlist/$playlistId")
+                                    }
+                                )
+                            }
+
+                            composable("playlist/{playlistId}") { backStackEntry ->
+
+                                val playlistId =
+                                    backStackEntry.arguments?.getString("playlistId")
+
+                                val pm = playbackManager
+                                PlaylistScreen(
+                                    playlistId = playlistId,
+                                    navidromeManager = navidromeManager,
+                                    playbackManager = pm,
+                                    topContentPadding = topSafePadding,
+                                    bottomContentPadding = bottomSafePadding,
+                                    currentTrackId = pm?.currentTrack?.id,
+                                    onBack = { navController.popBackStack() },
+                                    onTrackClick = { tracks, selectedIndex, playlistIdValue, playlistName, coverUrl ->
+                                        pm?.replaceQueue(
+                                            tracks,
+                                            selectedIndex,
+                                            playlistIdValue,
+                                            playlistName,
+                                            coverUrl
+                                        )
+                                    },
+                                    onTrackDoubleClick = { track, playlistIdValue, playlistName, coverUrl ->
+                                        pm?.queueNext(
+                                            track,
+                                            playlistIdValue,
+                                            playlistName,
+                                            coverUrl
+                                        )
+                                    },
+                                    onTrackLongClick = { track, playlistIdValue, playlistName, coverUrl ->
+                                        pm?.appendToQueue(
+                                            track,
+                                            playlistIdValue,
+                                            playlistName,
+                                            coverUrl
+                                        )
                                     }
                                 )
                             }

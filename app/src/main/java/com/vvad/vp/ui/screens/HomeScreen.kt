@@ -33,8 +33,10 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
+import com.vvad.vp.ui.components.PlaylistCover
 import com.vvad.vp.ui.components.albumCardGestures
 import com.vvad.vp.ui.models.Album
+import com.vvad.vp.ui.models.Playlist
 import kotlinx.coroutines.delay
 
 private enum class HomeMode {
@@ -49,6 +51,7 @@ fun HomeScreen(
     bottomContentPadding: Dp = 0.dp,
     onAlbumClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
+    onPlaylistClick: (String) -> Unit,
     onAlbumPlayNext: (Album) -> Unit,
     onAlbumAddToQueue: (Album) -> Unit
 ) {
@@ -57,11 +60,13 @@ fun HomeScreen(
     var recentlyPlayed by remember { mutableStateOf<List<Album>>(emptyList()) }
     var mostPlayedAlbums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var mostPlayedArtists by remember { mutableStateOf<List<Album>>(emptyList()) }
+    var yourMixes by remember { mutableStateOf<List<Playlist>>(emptyList()) }
     var homeMode by remember { mutableStateOf(HomeMode.Online) }
 
+    val playlistPrefix by navidromeManager.credentialsManager.playlistPrefix.collectAsState(initial = "")
     val isNetworkAvailable by rememberNetworkAvailability()
 
-    LaunchedEffect(isNetworkAvailable) {
+    LaunchedEffect(isNetworkAvailable, playlistPrefix) {
         while (true) {
             offlineAlbums = offlineLibraryManager.getOfflineAlbums()
 
@@ -70,10 +75,12 @@ fun HomeScreen(
                 recentlyPlayed = navidromeManager.getRecentlyPlayedAlbums(limit = 8)
                 mostPlayedAlbums = navidromeManager.getMostPlayedAlbums(limit = 8)
                 mostPlayedArtists = navidromeManager.getMostPlayedArtists(limit = 8)
+                yourMixes = navidromeManager.getPlaylistsByPrefix(playlistPrefix, limit = 12)
 
                 randomAlbums = if (fetchedAlbums.isNotEmpty()) fetchedAlbums else emptyList()
                 homeMode = HomeMode.Online
             } else {
+                yourMixes = emptyList()
                 homeMode = HomeMode.Offline
             }
 
@@ -181,6 +188,19 @@ fun HomeScreen(
             }
             if (mostPlayedArtists.isNotEmpty()) {
                 artistsSection(mostPlayedArtists, onArtistClick)
+            }
+            if (yourMixes.isNotEmpty()) {
+                item { Text("Your mixes", style = MaterialTheme.typography.titleLarge) }
+                item {
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        items(yourMixes, key = { "mix-${it.id}" }, contentType = { "playlist" }) { playlist ->
+                            PlaylistTile(
+                                playlist = playlist,
+                                onClick = { onPlaylistClick(playlist.id) }
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -441,6 +461,44 @@ fun ArtistTile(
             style = MaterialTheme.typography.bodyMedium,
             maxLines = 1,
             modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, delayMillis = 2000)
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun PlaylistTile(
+    playlist: Playlist,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(130.dp)
+            .clickable { onClick() }
+    ) {
+        PlaylistCover(
+            coverArtUrl = playlist.coverArtUrl,
+            contentDescription = playlist.name,
+            modifier = Modifier.size(130.dp),
+            shape = RoundedCornerShape(3.dp)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Text(
+            text = playlist.name,
+            style = MaterialTheme.typography.bodyMedium,
+            maxLines = 1,
+            modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE, delayMillis = 2000)
+        )
+
+        Text(
+            text = playlist.songCount?.let { count ->
+                if (count == 1) "1 song" else "$count songs"
+            } ?: "Playlist",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary,
+            maxLines = 1
         )
     }
 }
