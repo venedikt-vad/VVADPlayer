@@ -26,6 +26,10 @@ data class AlbumOfflineAvailability(
 )
 
 class OfflineLibraryManager(context: Context, private val credentialsManager: CredentialsManager) {
+    companion object {
+        private val AUDIO_EXTENSIONS = setOf("mp3", "aac", "m4a", "ogg", "flac", "wav")
+    }
+
     private val appContext = context.applicationContext
     private val offlineDir = File(appContext.filesDir, "offline")
     private val metadataDir = File(offlineDir, "metadata").apply { mkdirs() }
@@ -116,7 +120,11 @@ class OfflineLibraryManager(context: Context, private val credentialsManager: Cr
 
     fun getLocalTrackFile(trackId: String): File? {
         return tracksDir.listFiles()
-            ?.firstOrNull { it.name.startsWith("$trackId.") && it.isFile }
+            ?.firstOrNull { file ->
+                file.isFile &&
+                    file.name.startsWith("$trackId.") &&
+                    file.extension.lowercase() in AUDIO_EXTENSIONS
+            }
     }
 
     suspend fun downloadAlbumForOffline(
@@ -205,12 +213,8 @@ class OfflineLibraryManager(context: Context, private val credentialsManager: Cr
     private fun allCachedTrackIds(): Set<String> {
         return tracksDir.listFiles()
             .orEmpty()
-            .filter { it.isFile }
-            .mapNotNull { file ->
-                val name = file.name
-                val dotIndex = name.lastIndexOf('.')
-                if (dotIndex > 0) name.substring(0, dotIndex) else null
-            }
+            .filter { it.isFile && it.extension.lowercase() in AUDIO_EXTENSIONS }
+            .map { it.nameWithoutExtension }
             .toSet()
     }
 

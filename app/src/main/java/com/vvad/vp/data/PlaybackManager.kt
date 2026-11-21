@@ -255,16 +255,15 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         if (exoPlayer.playbackState == Player.STATE_IDLE) return
         if (!exoPlayer.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM)) return
 
-        val resolvedDuration = resolveDurationMs()
-        val target = if (resolvedDuration > 0L) {
-            position.coerceIn(0L, resolvedDuration)
+        val maxSeekPosition = effectiveDurationMs()
+        val target = if (maxSeekPosition > 0L) {
+            position.coerceIn(0L, maxSeekPosition)
         } else {
             position.coerceAtLeast(0L)
         }
 
         currentPosition = target
         exoPlayer.seekTo(target)
-        syncProgress()
     }
 
     fun play(track: Track, albumId: String, albumName: String, coverArtUrl: String) {
@@ -725,7 +724,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     private fun syncProgress() {
         currentPosition = exoPlayer.currentPosition.coerceAtLeast(0L)
         bufferedPosition = exoPlayer.bufferedPosition.coerceAtLeast(currentPosition)
-        duration = maxOf(resolveDurationMs(), currentPosition)
+        duration = effectiveDurationMs()
         isPlaying = exoPlayer.isPlaying
     }
 
@@ -738,8 +737,11 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         }
     }
 
+    private fun effectiveDurationMs(): Long =
+        maxOf(resolveDurationMs(), exoPlayer.currentPosition.coerceAtLeast(0L))
+
     private fun resolveDurationForMediaSession(): Long {
-        val resolvedDuration = maxOf(resolveDurationMs(), exoPlayer.currentPosition.coerceAtLeast(0L))
+        val resolvedDuration = effectiveDurationMs()
         return if (resolvedDuration > 0L) resolvedDuration else C.TIME_UNSET
     }
 
