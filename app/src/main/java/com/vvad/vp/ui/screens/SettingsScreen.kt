@@ -2,16 +2,20 @@ package com.vvad.vp.ui.screens
 
 import android.content.Context
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Image
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Storage
 import androidx.compose.material.icons.filled.Wifi
@@ -20,15 +24,20 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.vvad.vp.data.AudioCache
 import com.vvad.vp.data.CredentialsManager
+import com.vvad.vp.data.HomeRow
+import com.vvad.vp.data.NavItem
 import com.vvad.vp.data.NavidromeManager
+import com.vvad.vp.data.PrimaryColorOption
 import com.vvad.vp.ui.components.LocalAppHaptics
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -42,9 +51,9 @@ private enum class SettingsSection(
     val icon: ImageVector
 ) {
     CONNECTION("Connection", "Server address and account", Icons.Filled.Wifi),
-    TRANSCODING("Transcoding", "Streaming format and bitrate", Icons.Filled.MusicNote),
-    PLAYLISTS("Playlists", "Home mixes name filter", Icons.Filled.QueueMusic),
-    IMAGE_QUALITY("Image Quality", "Cover art resolution", Icons.Filled.Image),
+    PLAYBACK_QUALITY("Playback Quality", "Streaming and cover art quality", Icons.Filled.MusicNote),
+    HOMEPAGE("Homepage", "Home rows, order, and mix filter", Icons.Filled.Home),
+    NAVIGATION("Navigation", "Bottom navigation items and order", Icons.Filled.Menu),
     CACHE("Cache", "Offline files and local storage", Icons.Filled.Storage),
     SYSTEM("System", "Vibration feedback and app behavior", Icons.Filled.Settings)
 }
@@ -79,7 +88,7 @@ fun SettingsScreen(
     var playlistPrefixInput by remember { mutableStateOf<String?>(null) }
 
     val formats = listOf("raw", "mp3", "ogg", "aac")
-    val bitrates = listOf(0, 128, 192, 256, 320)
+    val bitrates = listOf(128, 192, 256, 320)
 
     var serverAddress by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
@@ -233,23 +242,24 @@ fun SettingsScreen(
                     }
                 }
 
-                SettingsSection.TRANSCODING -> {
+                SettingsSection.PLAYBACK_QUALITY -> {
+                    Text("Streaming", style = MaterialTheme.typography.titleMedium)
                     Text("Preferred Format", style = MaterialTheme.typography.labelMedium)
-                    FlowRow(
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         formats.forEach { format ->
-                            FilterChip(
+                            OptionChip(
+                                label = format.uppercase(),
                                 selected = savedFormat == format,
+                                modifier = Modifier.weight(1f),
                                 onClick = {
                                     scope.launch {
                                         val normalizedBitrate = if (format == "raw") 0 else savedBitrate
                                         credentialsManager.saveTranscodingSettings(format, normalizedBitrate)
                                     }
-                                },
-                                label = { Text(format.uppercase()) }
+                                }
                             )
                         }
                     }
@@ -263,55 +273,46 @@ fun SettingsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    FlowRow(
+                    Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         bitrates.forEach { br ->
-                            FilterChip(
-                                selected = if (savedFormat == "raw") br == 0 else savedBitrate == br,
+                            OptionChip(
+                                label = br.toString(),
+                                selected = savedBitrate == br,
+                                enabled = savedFormat != "raw",
+                                modifier = Modifier.weight(1f),
                                 onClick = {
-                                    if (savedFormat == "raw" && br != 0) return@FilterChip
                                     scope.launch { credentialsManager.saveTranscodingSettings(savedFormat, br) }
-                                },
-                                label = { Text(if (br == 0) "Unlimited" else br.toString()) }
+                                }
                             )
                         }
                     }
-                }
-
-                SettingsSection.PLAYLISTS -> {
-                    Text("Home mixes", style = MaterialTheme.typography.titleMedium)
-                    Text(
-                        text = "Playlists whose names start with this prefix appear in the \"Your mixes\" row on Home. Leave it empty to show all playlists.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    OptionChip(
+                        label = "Unlimited",
+                        selected = savedBitrate == 0,
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            scope.launch { credentialsManager.saveTranscodingSettings(savedFormat, 0) }
+                        }
                     )
 
-                    OutlinedTextField(
-                        value = playlistPrefixInput ?: savedPlaylistPrefix,
-                        onValueChange = { value ->
-                            playlistPrefixInput = value
-                            scope.launch { credentialsManager.savePlaylistPrefix(value) }
-                        },
-                        label = { Text("Playlist name prefix") },
-                        placeholder = { Text("e.g. Mix - ") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                SettingsSection.IMAGE_QUALITY -> {
+                    Text("Cover art", style = MaterialTheme.typography.titleMedium)
                     Text("Small covers (Home, grids)", style = MaterialTheme.typography.labelMedium)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(200, 300, 400, 512).forEach { size ->
-                            FilterChip(
+                            OptionChip(
+                                label = size.toString(),
                                 selected = savedSmallSize == size,
+                                modifier = Modifier.weight(1f),
                                 onClick = {
                                     scope.launch { credentialsManager.saveCoverSizes(size, savedLargeSize) }
-                                },
-                                label = { Text("$size") }
+                                }
                             )
                         }
                     }
@@ -320,15 +321,31 @@ fun SettingsScreen(
                     Text("Large covers (Player, Album detail)", style = MaterialTheme.typography.labelMedium)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(600, 800, 1024, 1200).forEach { size ->
-                            FilterChip(
+                            OptionChip(
+                                label = size.toString(),
                                 selected = savedLargeSize == size,
+                                modifier = Modifier.weight(1f),
                                 onClick = {
                                     scope.launch { credentialsManager.saveCoverSizes(savedSmallSize, size) }
-                                },
-                                label = { Text("$size") }
+                                }
                             )
                         }
                     }
+                }
+
+                SettingsSection.HOMEPAGE -> {
+                    HomepageSettingsContent(
+                        credentialsManager = credentialsManager,
+                        playlistPrefixInput = playlistPrefixInput ?: savedPlaylistPrefix,
+                        onPlaylistPrefixChange = { value ->
+                            playlistPrefixInput = value
+                            scope.launch { credentialsManager.savePlaylistPrefix(value) }
+                        }
+                    )
+                }
+
+                SettingsSection.NAVIGATION -> {
+                    NavigationSettingsContent(credentialsManager)
                 }
 
                 SettingsSection.CACHE -> {
@@ -409,6 +426,30 @@ private fun SettingsOverview(
 }
 
 @Composable
+private fun OptionChip(
+    label: String,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier,
+        label = {
+            Text(
+                text = label,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    )
+}
+
+@Composable
 private fun SettingsHeader(
     section: SettingsSection,
     onBack: () -> Unit
@@ -429,6 +470,213 @@ private fun SettingsHeader(
 }
 
 @Composable
+private fun NavigationSettingsContent(credentialsManager: CredentialsManager) {
+    val scope = rememberCoroutineScope()
+    val savedOrder by credentialsManager.navItemOrder.collectAsState(initial = NavItem.entries.toList())
+    val savedHiddenItems by credentialsManager.navHiddenItems.collectAsState(initial = emptySet())
+    var order by remember { mutableStateOf(savedOrder) }
+    var hiddenItems by remember { mutableStateOf(savedHiddenItems) }
+
+    LaunchedEffect(savedOrder) {
+        order = savedOrder
+    }
+    LaunchedEffect(savedHiddenItems) {
+        hiddenItems = savedHiddenItems
+    }
+
+    Text("Bottom navigation", style = MaterialTheme.typography.titleMedium)
+    Text(
+        text = "Choose which tabs appear and in what order. Home is always shown.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    order.forEachIndexed { index, item ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(item.label, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = when {
+                        item == NavItem.HOME -> "Always visible"
+                        item in hiddenItems -> "Hidden"
+                        else -> "Visible"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(
+                onClick = {
+                    val target = index - 1
+                    if (target in order.indices) {
+                        val updated = order.toMutableList()
+                        val movedItem = updated.removeAt(index)
+                        updated.add(target, movedItem)
+                        order = updated
+                        scope.launch { credentialsManager.saveNavItemOrder(updated) }
+                    }
+                },
+                enabled = index > 0
+            ) {
+                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up")
+            }
+            IconButton(
+                onClick = {
+                    val target = index + 1
+                    if (target in order.indices) {
+                        val updated = order.toMutableList()
+                        val movedItem = updated.removeAt(index)
+                        updated.add(target, movedItem)
+                        order = updated
+                        scope.launch { credentialsManager.saveNavItemOrder(updated) }
+                    }
+                },
+                enabled = index < order.lastIndex
+            ) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down")
+            }
+            Switch(
+                checked = item == NavItem.HOME || item !in hiddenItems,
+                onCheckedChange = if (item == NavItem.HOME) {
+                    null
+                } else {
+                    { visible ->
+                        val updated = if (visible) hiddenItems - item else hiddenItems + item
+                        hiddenItems = updated
+                        scope.launch { credentialsManager.saveNavHiddenItems(updated) }
+                    }
+                },
+                enabled = item != NavItem.HOME
+            )
+        }
+        if (index < order.lastIndex) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+    }
+
+    OutlinedButton(
+        onClick = {
+            val defaultOrder = NavItem.entries.toList()
+            order = defaultOrder
+            hiddenItems = emptySet()
+            scope.launch {
+                credentialsManager.saveNavItemOrder(defaultOrder)
+                credentialsManager.saveNavHiddenItems(emptySet())
+            }
+        },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text("Reset navigation")
+    }
+}
+
+@Composable
+private fun HomepageSettingsContent(
+    credentialsManager: CredentialsManager,
+    playlistPrefixInput: String,
+    onPlaylistPrefixChange: (String) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val savedOrder by credentialsManager.homeRowOrder.collectAsState(initial = HomeRow.entries.toList())
+    val savedHiddenRows by credentialsManager.homeHiddenRows.collectAsState(initial = emptySet())
+    var order by remember { mutableStateOf(savedOrder) }
+    var hiddenRows by remember { mutableStateOf(savedHiddenRows) }
+
+    LaunchedEffect(savedOrder) {
+        order = savedOrder
+    }
+    LaunchedEffect(savedHiddenRows) {
+        hiddenRows = savedHiddenRows
+    }
+
+    Text("Home rows", style = MaterialTheme.typography.titleMedium)
+    Text(
+        text = "Choose which rows appear on Home and in what order.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+
+    order.forEachIndexed { index, row ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(row.label, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = if (row in hiddenRows) "Hidden" else "Visible",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            IconButton(
+                onClick = {
+                    val target = index - 1
+                    if (target in order.indices) {
+                        val updated = order.toMutableList()
+                        val item = updated.removeAt(index)
+                        updated.add(target, item)
+                        order = updated
+                        scope.launch { credentialsManager.saveHomeRowOrder(updated) }
+                    }
+                },
+                enabled = index > 0
+            ) {
+                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move up")
+            }
+            IconButton(
+                onClick = {
+                    val target = index + 1
+                    if (target in order.indices) {
+                        val updated = order.toMutableList()
+                        val item = updated.removeAt(index)
+                        updated.add(target, item)
+                        order = updated
+                        scope.launch { credentialsManager.saveHomeRowOrder(updated) }
+                    }
+                },
+                enabled = index < order.lastIndex
+            ) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move down")
+            }
+            Switch(
+                checked = row !in hiddenRows,
+                onCheckedChange = { visible ->
+                    val updated = if (visible) hiddenRows - row else hiddenRows + row
+                    hiddenRows = updated
+                    scope.launch { credentialsManager.saveHomeHiddenRows(updated) }
+                }
+            )
+        }
+        if (index < order.lastIndex) {
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+        }
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+    Spacer(modifier = Modifier.height(8.dp))
+
+    Text("Your mixes filter", style = MaterialTheme.typography.titleMedium)
+    Text(
+        text = "Playlists whose names start with this prefix appear in the \"Your mixes\" row on Home. Leave it empty to show all playlists.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    OutlinedTextField(
+        value = playlistPrefixInput,
+        onValueChange = onPlaylistPrefixChange,
+        label = { Text("Playlist name prefix") },
+        placeholder = { Text("e.g. Mix - ") },
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
 private fun SystemSettingsContent(
     credentialsManager: CredentialsManager,
     onTestVibration: () -> Unit
@@ -436,6 +684,7 @@ private fun SystemSettingsContent(
     val scope = rememberCoroutineScope()
     val vibrationEnabled by credentialsManager.vibrationEnabled.collectAsState(initial = true)
     val vibrationIntensity by credentialsManager.vibrationIntensity.collectAsState(initial = 2)
+    val primaryColor by credentialsManager.primaryColor.collectAsState(initial = PrimaryColorOption.DEFAULT)
 
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -486,6 +735,49 @@ private fun SystemSettingsContent(
         modifier = Modifier.fillMaxWidth()
     ) {
         Text("Test vibration")
+    }
+
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+    Text("Primary color", style = MaterialTheme.typography.titleMedium)
+    Text(
+        text = "Accent color used throughout the app.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant
+    )
+    PrimaryColorOption.entries.forEach { option ->
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable {
+                    scope.launch { credentialsManager.savePrimaryColor(option) }
+                }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(Color(option.argb))
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(option.label, modifier = Modifier.weight(1f))
+            RadioButton(
+                selected = primaryColor == option,
+                onClick = {
+                    scope.launch { credentialsManager.savePrimaryColor(option) }
+                }
+            )
+        }
+    }
+    OutlinedButton(
+        onClick = {
+            scope.launch { credentialsManager.savePrimaryColor(PrimaryColorOption.DEFAULT) }
+        },
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text("Reset to default")
     }
 }
 

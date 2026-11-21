@@ -56,10 +56,12 @@ import coil.request.CachePolicy
 import com.vvad.vp.data.CredentialsManager
 import com.vvad.vp.data.DownloadManager
 import com.vvad.vp.data.DownloadService
+import com.vvad.vp.data.NavItem
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.data.PlaybackManager
 import com.vvad.vp.data.PlaybackService
+import com.vvad.vp.data.PrimaryColorOption
 import com.vvad.vp.ui.components.AppHaptics
 import com.vvad.vp.ui.components.LocalAppHaptics
 import com.vvad.vp.ui.components.PlayerStripe
@@ -110,7 +112,12 @@ class MainActivity : ComponentActivity() {
         bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
 
         setContent {
-            VVADPlayerTheme {
+            val primaryColorOption by credentialsManager.primaryColor.collectAsState(
+                initial = PrimaryColorOption.DEFAULT
+            )
+            VVADPlayerTheme(
+                primaryColor = androidx.compose.ui.graphics.Color(primaryColorOption.argb)
+            ) {
                 val vibrationEnabled by credentialsManager.vibrationEnabled.collectAsState(initial = true)
                 val vibrationIntensity by credentialsManager.vibrationIntensity.collectAsState(initial = 2)
                 val appHaptics = remember(vibrationEnabled, vibrationIntensity) {
@@ -165,6 +172,15 @@ class MainActivity : ComponentActivity() {
                     currentRoute == "playlists" || currentRoute?.startsWith("playlist/") == true -> "playlists"
                     currentRoute == "artists" || currentRoute?.startsWith("artist") == true -> "artists"
                     else -> null
+                }
+                val navItemOrder by credentialsManager.navItemOrder.collectAsState(
+                    initial = NavItem.entries.toList()
+                )
+                val hiddenNavItems by credentialsManager.navHiddenItems.collectAsState(
+                    initial = emptySet()
+                )
+                val visibleNavItems = navItemOrder.filter { item ->
+                    item == NavItem.HOME || item !in hiddenNavItems
                 }
 
                 val navigateToTopLevel: (String) -> Unit = fun(route: String) {
@@ -271,70 +287,36 @@ class MainActivity : ComponentActivity() {
                                             containerColor = androidx.compose.ui.graphics.Color.Transparent,
                                             contentColor = MaterialTheme.colorScheme.onSurface
                                         ) {
-                                            NavigationBarItem(
-                                                selected = selectedNavRoute == "home",
-                                                onClick = {
-                                                    navigateToTopLevel("home")
-                                                },
-                                                icon = {
-                                                    Icon(Icons.Default.Home, contentDescription = "Home")
-                                                },
-                                                label = {
-                                                    Text("Home")
+                                            visibleNavItems.forEach { item ->
+                                                val route = when (item) {
+                                                    NavItem.HOME -> "home"
+                                                    NavItem.SEARCH -> "search"
+                                                    NavItem.ALBUMS -> "albums"
+                                                    NavItem.PLAYLISTS -> "playlists"
+                                                    NavItem.ARTISTS -> "artists"
                                                 }
-                                            )
-
-                                            NavigationBarItem(
-                                                selected = selectedNavRoute == "search",
-                                                onClick = {
-                                                    navigateToTopLevel("search")
-                                                },
-                                                icon = {
-                                                    Icon(Icons.Default.Search, contentDescription = "Search")
-                                                },
-                                                label = {
-                                                    Text("Search")
-                                                }
-                                            )
-
-                                            NavigationBarItem(
-                                                selected = selectedNavRoute == "albums",
-                                                onClick = {
-                                                    navigateToTopLevel("albums")
-                                                },
-                                                icon = {
-                                                    Icon(Icons.Default.Album, contentDescription = "Albums")
-                                                },
-                                                label = {
-                                                    Text("Albums")
-                                                }
-                                            )
-
-                                            NavigationBarItem(
-                                                selected = selectedNavRoute == "playlists",
-                                                onClick = {
-                                                    navigateToTopLevel("playlists")
-                                                },
-                                                icon = {
-                                                    Icon(Icons.Default.QueueMusic, contentDescription = "Playlists")
-                                                },
-                                                label = {
-                                                    Text("Playlists")
-                                                }
-                                            )
-
-                                            NavigationBarItem(
-                                                selected = selectedNavRoute == "artists",
-                                                onClick = {
-                                                    navigateToTopLevel("artists")
-                                                },
-                                                icon = {
-                                                    Icon(Icons.Default.Person, contentDescription = "Artists")
-                                                },
-                                                label = {
-                                                    Text("Artists")
-                                                }
-                                            )
+                                                NavigationBarItem(
+                                                    selected = selectedNavRoute == route,
+                                                    onClick = {
+                                                        navigateToTopLevel(route)
+                                                    },
+                                                    icon = {
+                                                        Icon(
+                                                            imageVector = when (item) {
+                                                                NavItem.HOME -> Icons.Default.Home
+                                                                NavItem.SEARCH -> Icons.Default.Search
+                                                                NavItem.ALBUMS -> Icons.Default.Album
+                                                                NavItem.PLAYLISTS -> Icons.Default.QueueMusic
+                                                                NavItem.ARTISTS -> Icons.Default.Person
+                                                            },
+                                                            contentDescription = item.label
+                                                        )
+                                                    },
+                                                    label = {
+                                                        Text(item.label)
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -475,7 +457,7 @@ class MainActivity : ComponentActivity() {
                                     currentTrackId = pm?.currentTrack?.id,
                                     onBack = { navController.popBackStack() },
                                     onTrackClick = { tracks, selectedIndex, playlistIdValue, playlistName, coverUrl ->
-                                        pm?.replaceQueue(
+                                        pm?.replacePlaylistQueue(
                                             tracks,
                                             selectedIndex,
                                             playlistIdValue,
@@ -484,7 +466,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                     },
                                     onTrackDoubleClick = { track, playlistIdValue, playlistName, coverUrl ->
-                                        pm?.queueNext(
+                                        pm?.queueNextFromPlaylist(
                                             track,
                                             playlistIdValue,
                                             playlistName,
@@ -492,7 +474,7 @@ class MainActivity : ComponentActivity() {
                                         )
                                     },
                                     onTrackLongClick = { track, playlistIdValue, playlistName, coverUrl ->
-                                        pm?.appendToQueue(
+                                        pm?.appendPlaylistTrackToQueue(
                                             track,
                                             playlistIdValue,
                                             playlistName,
@@ -614,6 +596,10 @@ class MainActivity : ComponentActivity() {
                                 onAlbumClick = { albumId ->
                                     isPlayerVisible = false
                                     navController.navigate("album/$albumId")
+                                },
+                                onPlaylistClick = { playlistId ->
+                                    isPlayerVisible = false
+                                    navController.navigate("playlist/$playlistId")
                                 },
                                 onArtistClick = { artistId ->
                                     isPlayerVisible = false

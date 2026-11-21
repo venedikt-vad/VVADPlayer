@@ -9,6 +9,36 @@ import kotlinx.coroutines.flow.map
 
 private val Context.dataStore by preferencesDataStore(name = "navidrome_settings")
 
+enum class PrimaryColorOption(val key: String, val label: String, val argb: Long) {
+    DEFAULT("default", "Default Red", 0xFF950400),
+    CRIMSON("crimson", "Crimson", 0xFFD32F2F),
+    ORANGE("orange", "Orange", 0xFFE65100),
+    AMBER("amber", "Amber", 0xFFFF8F00),
+    GREEN("green", "Green", 0xFF2E7D32),
+    TEAL("teal", "Teal", 0xFF00695C),
+    BLUE("blue", "Blue", 0xFF1565C0),
+    INDIGO("indigo", "Indigo", 0xFF283593),
+    PURPLE("purple", "Purple", 0xFF6A1B9A),
+    PINK("pink", "Pink", 0xFFAD1457)
+}
+
+enum class NavItem(val key: String, val label: String) {
+    HOME("home", "Home"),
+    SEARCH("search", "Search"),
+    ALBUMS("albums", "Albums"),
+    PLAYLISTS("playlists", "Playlists"),
+    ARTISTS("artists", "Artists")
+}
+
+enum class HomeRow(val key: String, val label: String) {
+    AVAILABLE_OFFLINE("available_offline", "Available Offline"),
+    RANDOM_ALBUMS("random_albums", "Random Albums"),
+    RECENTLY_PLAYED("recently_played", "Recently Played"),
+    MOST_PLAYED_ALBUMS("most_played_albums", "Most Played Albums"),
+    MOST_PLAYED_ARTISTS("most_played_artists", "Most Played Artists"),
+    YOUR_MIXES("your_mixes", "Your mixes")
+}
+
 class CredentialsManager(private val context: Context) {
     companion object {
         val SERVER = stringPreferencesKey("server")
@@ -30,6 +60,11 @@ class CredentialsManager(private val context: Context) {
         val VIBRATION_INTENSITY = intPreferencesKey("vibration_intensity")
 
         val PLAYLIST_PREFIX = stringPreferencesKey("playlist_prefix")
+        val HOME_ROW_ORDER = stringPreferencesKey("home_row_order")
+        val HOME_HIDDEN_ROWS = stringSetPreferencesKey("home_hidden_rows")
+        val PRIMARY_COLOR = stringPreferencesKey("primary_color")
+        val NAV_ITEM_ORDER = stringPreferencesKey("nav_item_order")
+        val NAV_HIDDEN_ITEMS = stringSetPreferencesKey("nav_hidden_items")
     }
     suspend fun getRawServer(): String = server.first()
     suspend fun getUsername(): String = user.first()
@@ -126,6 +161,73 @@ class CredentialsManager(private val context: Context) {
     suspend fun savePlaylistPrefix(prefix: String) {
         context.dataStore.edit {
             it[PLAYLIST_PREFIX] = prefix
+        }
+    }
+
+    val homeRowOrder: Flow<List<HomeRow>> = context.dataStore.data.map { prefs ->
+        val parsed = prefs[HOME_ROW_ORDER].orEmpty()
+            .split(',')
+            .mapNotNull { key -> HomeRow.entries.firstOrNull { it.key == key } }
+            .distinct()
+        parsed + HomeRow.entries.filter { it !in parsed }
+    }
+
+    val homeHiddenRows: Flow<Set<HomeRow>> = context.dataStore.data.map { prefs ->
+        prefs[HOME_HIDDEN_ROWS].orEmpty()
+            .mapNotNull { key -> HomeRow.entries.firstOrNull { it.key == key } }
+            .toSet()
+    }
+
+    suspend fun saveHomeRowOrder(order: List<HomeRow>) {
+        context.dataStore.edit {
+            it[HOME_ROW_ORDER] = order.joinToString(",") { row -> row.key }
+        }
+    }
+
+    suspend fun saveHomeHiddenRows(hidden: Set<HomeRow>) {
+        context.dataStore.edit {
+            it[HOME_HIDDEN_ROWS] = hidden.map { row -> row.key }.toSet()
+        }
+    }
+
+    val primaryColor: Flow<PrimaryColorOption> = context.dataStore.data.map { prefs ->
+        val key = prefs[PRIMARY_COLOR]
+        PrimaryColorOption.entries.firstOrNull { it.key == key } ?: PrimaryColorOption.DEFAULT
+    }
+
+    suspend fun savePrimaryColor(option: PrimaryColorOption) {
+        context.dataStore.edit {
+            it[PRIMARY_COLOR] = option.key
+        }
+    }
+
+    val navItemOrder: Flow<List<NavItem>> = context.dataStore.data.map { prefs ->
+        val parsed = prefs[NAV_ITEM_ORDER].orEmpty()
+            .split(',')
+            .mapNotNull { key -> NavItem.entries.firstOrNull { it.key == key } }
+            .distinct()
+        parsed + NavItem.entries.filter { it !in parsed }
+    }
+
+    val navHiddenItems: Flow<Set<NavItem>> = context.dataStore.data.map { prefs ->
+        prefs[NAV_HIDDEN_ITEMS].orEmpty()
+            .mapNotNull { key -> NavItem.entries.firstOrNull { it.key == key } }
+            .filterNot { it == NavItem.HOME }
+            .toSet()
+    }
+
+    suspend fun saveNavItemOrder(order: List<NavItem>) {
+        context.dataStore.edit {
+            it[NAV_ITEM_ORDER] = order.joinToString(",") { item -> item.key }
+        }
+    }
+
+    suspend fun saveNavHiddenItems(hidden: Set<NavItem>) {
+        context.dataStore.edit {
+            it[NAV_HIDDEN_ITEMS] = hidden
+                .filterNot { item -> item == NavItem.HOME }
+                .map { item -> item.key }
+                .toSet()
         }
     }
 }

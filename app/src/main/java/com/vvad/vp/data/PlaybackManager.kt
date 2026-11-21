@@ -43,6 +43,8 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     companion object {
         private const val BACK_BUFFER_MS = 10 * 60 * 1000
         private const val PREVIOUS_RESTART_THRESHOLD_MS = 5_000L
+        const val SOURCE_ALBUM = "album"
+        const val SOURCE_PLAYLIST = "playlist"
     }
 
     data class QueueEntry(
@@ -50,7 +52,11 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         val albumId: String,
         val albumName: String,
         val coverArtUrl: String,
-        val queueId: String = UUID.randomUUID().toString()
+        val queueId: String = UUID.randomUUID().toString(),
+        val sourceType: String = SOURCE_ALBUM,
+        val sourceId: String = albumId,
+        val sourceName: String = albumName,
+        val sourceCoverArtUrl: String = coverArtUrl
     )
 
     private var trackChangeListener: TrackChangeListener? = null
@@ -76,6 +82,14 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
     var currentAlbumId by mutableStateOf<String?>(null)
     var currentAlbumName by mutableStateOf("")
     var currentCoverArtUrl by mutableStateOf("")
+    var currentSourceType by mutableStateOf(SOURCE_ALBUM)
+        private set
+    var currentSourceId by mutableStateOf<String?>(null)
+        private set
+    var currentSourceName by mutableStateOf("")
+        private set
+    var currentSourceCoverArtUrl by mutableStateOf("")
+        private set
     var isPlaying by mutableStateOf(false)
     var currentPosition by mutableLongStateOf(0L)
     var bufferedPosition by mutableLongStateOf(0L)
@@ -228,6 +242,10 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
             currentAlbumId = entry.albumId
             currentAlbumName = entry.albumName
             currentCoverArtUrl = entry.coverArtUrl
+            currentSourceType = entry.sourceType
+            currentSourceId = entry.sourceId
+            currentSourceName = entry.sourceName
+            currentSourceCoverArtUrl = entry.sourceCoverArtUrl
             hasScrobbled = false
             isCurrentTrackFavorite = entry.track.id in favoriteTrackIds
         }
@@ -264,16 +282,24 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         startIndex: Int,
         albumId: String,
         albumName: String,
-        coverArtUrl: String
+        coverArtUrl: String,
+        sourceType: String = SOURCE_ALBUM,
+        sourceId: String = albumId,
+        sourceName: String = albumName,
+        sourceCoverArtUrl: String = coverArtUrl
     ) {
         if (tracks.isEmpty()) return
 
         val newQueue = tracks.map { track ->
-            QueueEntry(
+            buildQueueEntry(
                 track = track,
                 albumId = albumId,
                 albumName = albumName,
-                coverArtUrl = coverArtUrl
+                coverArtUrl = coverArtUrl,
+                sourceType = sourceType,
+                sourceId = sourceId,
+                sourceName = sourceName,
+                sourceCoverArtUrl = sourceCoverArtUrl
             )
         }
         queue = newQueue
@@ -281,10 +307,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         val startIdx = startIndex.coerceIn(0, newQueue.lastIndex)
         currentQueueIndex = startIdx
         val entry = newQueue[startIdx]
-        currentTrack = entry.track
-        currentAlbumId = entry.albumId
-        currentAlbumName = entry.albumName
-        currentCoverArtUrl = entry.coverArtUrl
+        applyCurrentEntry(entry)
         hasScrobbled = false
         isCurrentTrackFavorite = entry.track.id in favoriteTrackIds
 
@@ -307,6 +330,26 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
                 Log.e("Playback", "replaceQueue failed", e)
             }
         }
+    }
+
+    fun replacePlaylistQueue(
+        tracks: List<Track>,
+        startIndex: Int,
+        playlistId: String,
+        playlistName: String,
+        coverArtUrl: String
+    ) {
+        replaceQueue(
+            tracks = tracks,
+            startIndex = startIndex,
+            albumId = "",
+            albumName = "",
+            coverArtUrl = coverArtUrl,
+            sourceType = SOURCE_PLAYLIST,
+            sourceId = playlistId,
+            sourceName = playlistName,
+            sourceCoverArtUrl = coverArtUrl
+        )
     }
 
     fun appendToQueue(track: Track, albumId: String, albumName: String, coverArtUrl: String) {
@@ -349,26 +392,109 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         )
     }
 
+    fun appendPlaylistTrackToQueue(
+        track: Track,
+        playlistId: String,
+        playlistName: String,
+        coverArtUrl: String
+    ) {
+        addTracksToQueue(
+            tracks = listOf(track),
+            albumId = "",
+            albumName = "",
+            coverArtUrl = coverArtUrl,
+            insertAfterCurrent = false,
+            sourceType = SOURCE_PLAYLIST,
+            sourceId = playlistId,
+            sourceName = playlistName,
+            sourceCoverArtUrl = coverArtUrl
+        )
+    }
+
+    fun queueNextFromPlaylist(
+        track: Track,
+        playlistId: String,
+        playlistName: String,
+        coverArtUrl: String
+    ) {
+        addTracksToQueue(
+            tracks = listOf(track),
+            albumId = "",
+            albumName = "",
+            coverArtUrl = coverArtUrl,
+            insertAfterCurrent = true,
+            sourceType = SOURCE_PLAYLIST,
+            sourceId = playlistId,
+            sourceName = playlistName,
+            sourceCoverArtUrl = coverArtUrl
+        )
+    }
+
+    private fun buildQueueEntry(
+        track: Track,
+        albumId: String,
+        albumName: String,
+        coverArtUrl: String,
+        sourceType: String,
+        sourceId: String,
+        sourceName: String,
+        sourceCoverArtUrl: String
+    ): QueueEntry {
+        val useTrackAlbum = sourceType == SOURCE_PLAYLIST
+        return QueueEntry(
+            track = track,
+            albumId = if (useTrackAlbum) track.albumId else albumId,
+            albumName = if (useTrackAlbum) track.albumName.ifBlank { sourceName } else albumName,
+            coverArtUrl = coverArtUrl,
+            sourceType = sourceType,
+            sourceId = sourceId,
+            sourceName = sourceName,
+            sourceCoverArtUrl = sourceCoverArtUrl
+        )
+    }
+
+    private fun applyCurrentEntry(entry: QueueEntry) {
+        currentTrack = entry.track
+        currentAlbumId = entry.albumId
+        currentAlbumName = entry.albumName
+        currentCoverArtUrl = entry.coverArtUrl
+        currentSourceType = entry.sourceType
+        currentSourceId = entry.sourceId
+        currentSourceName = entry.sourceName
+        currentSourceCoverArtUrl = entry.sourceCoverArtUrl
+    }
+
     private fun addTracksToQueue(
         tracks: List<Track>,
         albumId: String,
         albumName: String,
         coverArtUrl: String,
-        insertAfterCurrent: Boolean
+        insertAfterCurrent: Boolean,
+        sourceType: String = SOURCE_ALBUM,
+        sourceId: String = albumId,
+        sourceName: String = albumName,
+        sourceCoverArtUrl: String = coverArtUrl
     ) {
         if (tracks.isEmpty()) return
 
         if (queue.isEmpty() || currentQueueIndex !in queue.indices || currentTrack == null) {
-            replaceQueue(tracks, 0, albumId, albumName, coverArtUrl)
+            replaceQueue(
+                tracks, 0, albumId, albumName, coverArtUrl,
+                sourceType, sourceId, sourceName, sourceCoverArtUrl
+            )
             return
         }
 
         val entries = tracks.map { track ->
-            QueueEntry(
+            buildQueueEntry(
                 track = track,
                 albumId = albumId,
                 albumName = albumName,
-                coverArtUrl = coverArtUrl
+                coverArtUrl = coverArtUrl,
+                sourceType = sourceType,
+                sourceId = sourceId,
+                sourceName = sourceName,
+                sourceCoverArtUrl = sourceCoverArtUrl
             )
         }
 
@@ -381,7 +507,10 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
             }
 
             if (queue.isEmpty() || currentQueueIndex !in queue.indices || currentTrack == null) {
-                replaceQueue(tracks, 0, albumId, albumName, coverArtUrl)
+                replaceQueue(
+                    tracks, 0, albumId, albumName, coverArtUrl,
+                    sourceType, sourceId, sourceName, sourceCoverArtUrl
+                )
                 return@launch
             }
 
@@ -570,10 +699,7 @@ class PlaybackManager(context: Context, private val navidromeManager: NavidromeM
         scope.launch {
             queue = listOf(currentEntry)
             currentQueueIndex = 0
-            currentTrack = currentEntry.track
-            currentAlbumId = currentEntry.albumId
-            currentAlbumName = currentEntry.albumName
-            currentCoverArtUrl = currentEntry.coverArtUrl
+            applyCurrentEntry(currentEntry)
             exoPlayer.stop()
             exoPlayer.clearMediaItems()
             val mediaItem = buildMediaItem(currentEntry)

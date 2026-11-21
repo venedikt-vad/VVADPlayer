@@ -27,6 +27,12 @@ class NavidromeManager(
         val fromOfflineCache: Boolean
     )
 
+    data class PagedResult<T>(
+        val items: List<T>,
+        val total: Int?,
+        val hasMore: Boolean
+    )
+
     companion object {
         private const val TAG = "NavidromeManager"
         const val API_VERSION = "1.16.1"
@@ -242,16 +248,27 @@ class NavidromeManager(
         return@withContext emptyList()
     }
 
-    suspend fun getAlbums(limit: Int = 500, sort: String = "name", order: String = "ASC"): List<Album> = withContext(Dispatchers.IO) {
+    suspend fun getAlbums(limit: Int = 500, sort: String = "name", order: String = "ASC"): List<Album> {
+        return getAlbumsPage(start = 0, limit = limit, sort = sort, order = order).items
+    }
+
+    suspend fun getAlbumsPage(
+        start: Int = 0,
+        limit: Int = 100,
+        sort: String = "name",
+        order: String = "ASC"
+    ): PagedResult<Album> = withContext(Dispatchers.IO) {
         if (!ensureNativeAuth()) {
             Log.e(TAG, "Native authentication failed while fetching albums.")
-            return@withContext emptyList()
+            return@withContext PagedResult(emptyList(), null, false)
         }
 
         val baseUrl = credentialsManager.getFullServerUrl()
+        val safeStart = start.coerceAtLeast(0)
+        val safeLimit = limit.coerceAtLeast(1)
         try {
             val encodedSort = URLEncoder.encode(sort, "UTF-8")
-            val url = URL("$baseUrl/api/album?_sort=$encodedSort&_order=$order&_end=$limit")
+            val url = URL("$baseUrl/api/album?_sort=$encodedSort&_order=$order&_start=$safeStart&_end=${safeStart + safeLimit}")
             val urlConnection = url.openConnection() as HttpURLConnection
             urlConnection.requestMethod = "GET"
             urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
@@ -259,24 +276,39 @@ class NavidromeManager(
 
             if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
                 val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
-                return@withContext parseAlbumList(JSONArray(rawJson))
+                val items = parseAlbumList(JSONArray(rawJson))
+                val total = urlConnection.getHeaderField("X-Total-Count")?.toIntOrNull()
+                val hasMore = total?.let { safeStart + items.size < it }
+                    ?: (items.size >= safeLimit)
+                return@withContext PagedResult(items, total, hasMore)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during albums fetch", e)
         }
-        return@withContext emptyList()
+        return@withContext PagedResult(emptyList(), null, false)
     }
 
-    suspend fun getArtists(limit: Int = 500, sort: String = "name", order: String = "ASC"): List<Album> = withContext(Dispatchers.IO) {
+    suspend fun getArtists(limit: Int = 500, sort: String = "name", order: String = "ASC"): List<Album> {
+        return getArtistsPage(start = 0, limit = limit, sort = sort, order = order).items
+    }
+
+    suspend fun getArtistsPage(
+        start: Int = 0,
+        limit: Int = 100,
+        sort: String = "name",
+        order: String = "ASC"
+    ): PagedResult<Album> = withContext(Dispatchers.IO) {
         if (!ensureNativeAuth()) {
             Log.e(TAG, "Native authentication failed while fetching artists.")
-            return@withContext emptyList()
+            return@withContext PagedResult(emptyList(), null, false)
         }
 
         val baseUrl = credentialsManager.getFullServerUrl()
+        val safeStart = start.coerceAtLeast(0)
+        val safeLimit = limit.coerceAtLeast(1)
         try {
             val encodedSort = URLEncoder.encode(sort, "UTF-8")
-            val url = URL("$baseUrl/api/artist?_sort=$encodedSort&_order=$order&_end=$limit")
+            val url = URL("$baseUrl/api/artist?_sort=$encodedSort&_order=$order&_start=$safeStart&_end=${safeStart + safeLimit}")
             val urlConnection = url.openConnection() as HttpURLConnection
             urlConnection.requestMethod = "GET"
             urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
@@ -284,12 +316,16 @@ class NavidromeManager(
 
             if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
                 val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
-                return@withContext parseArtistList(JSONArray(rawJson))
+                val items = parseArtistList(JSONArray(rawJson))
+                val total = urlConnection.getHeaderField("X-Total-Count")?.toIntOrNull()
+                val hasMore = total?.let { safeStart + items.size < it }
+                    ?: (items.size >= safeLimit)
+                return@withContext PagedResult(items, total, hasMore)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during artists fetch", e)
         }
-        return@withContext emptyList()
+        return@withContext PagedResult(emptyList(), null, false)
     }
 
     suspend fun getPlaylists(
@@ -368,17 +404,27 @@ class NavidromeManager(
         return@withContext null
     }
 
-    suspend fun searchAlbums(query: String, limit: Int = 30): List<Album> = withContext(Dispatchers.IO) {
-        if (query.isBlank()) return@withContext emptyList()
+    suspend fun searchAlbums(query: String, limit: Int = 30): List<Album> {
+        return searchAlbumsPage(query = query, start = 0, limit = limit).items
+    }
+
+    suspend fun searchAlbumsPage(
+        query: String,
+        start: Int = 0,
+        limit: Int = 30
+    ): PagedResult<Album> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext PagedResult(emptyList(), null, false)
         if (!ensureNativeAuth()) {
             Log.e(TAG, "Native authentication failed while searching albums.")
-            return@withContext emptyList()
+            return@withContext PagedResult(emptyList(), null, false)
         }
 
         val baseUrl = credentialsManager.getFullServerUrl()
+        val safeStart = start.coerceAtLeast(0)
+        val safeLimit = limit.coerceAtLeast(1)
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            val url = URL("$baseUrl/api/album?name=$encodedQuery&_order=ASC&_end=$limit")
+            val url = URL("$baseUrl/api/album?name=$encodedQuery&_order=ASC&_start=$safeStart&_end=${safeStart + safeLimit}")
             val urlConnection = url.openConnection() as HttpURLConnection
             urlConnection.requestMethod = "GET"
             urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
@@ -386,25 +432,39 @@ class NavidromeManager(
 
             if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
                 val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
-                return@withContext parseAlbumList(JSONArray(rawJson))
+                val items = parseAlbumList(JSONArray(rawJson))
+                val total = urlConnection.getHeaderField("X-Total-Count")?.toIntOrNull()
+                val hasMore = total?.let { safeStart + items.size < it }
+                    ?: (items.size >= safeLimit)
+                return@withContext PagedResult(items, total, hasMore)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during album search", e)
         }
-        return@withContext emptyList()
+        return@withContext PagedResult(emptyList(), null, false)
     }
 
-    suspend fun searchArtists(query: String, limit: Int = 10): List<Album> = withContext(Dispatchers.IO) {
-        if (query.isBlank()) return@withContext emptyList()
+    suspend fun searchArtists(query: String, limit: Int = 10): List<Album> {
+        return searchArtistsPage(query = query, start = 0, limit = limit).items
+    }
+
+    suspend fun searchArtistsPage(
+        query: String,
+        start: Int = 0,
+        limit: Int = 10
+    ): PagedResult<Album> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext PagedResult(emptyList(), null, false)
         if (!ensureNativeAuth()) {
             Log.e(TAG, "Native authentication failed while searching artists.")
-            return@withContext emptyList()
+            return@withContext PagedResult(emptyList(), null, false)
         }
 
         val baseUrl = credentialsManager.getFullServerUrl()
+        val safeStart = start.coerceAtLeast(0)
+        val safeLimit = limit.coerceAtLeast(1)
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            val url = URL("$baseUrl/api/artist?name=$encodedQuery&_order=ASC&_end=$limit")
+            val url = URL("$baseUrl/api/artist?name=$encodedQuery&_order=ASC&_start=$safeStart&_end=${safeStart + safeLimit}")
             val urlConnection = url.openConnection() as HttpURLConnection
             urlConnection.requestMethod = "GET"
             urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
@@ -412,25 +472,39 @@ class NavidromeManager(
 
             if (urlConnection.responseCode == HttpURLConnection.HTTP_OK) {
                 val rawJson = urlConnection.inputStream.bufferedReader().use { it.readText() }
-                return@withContext parseArtistList(JSONArray(rawJson))
+                val items = parseArtistList(JSONArray(rawJson))
+                val total = urlConnection.getHeaderField("X-Total-Count")?.toIntOrNull()
+                val hasMore = total?.let { safeStart + items.size < it }
+                    ?: (items.size >= safeLimit)
+                return@withContext PagedResult(items, total, hasMore)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during artist search", e)
         }
-        return@withContext emptyList()
+        return@withContext PagedResult(emptyList(), null, false)
     }
 
-    suspend fun searchSongs(query: String, limit: Int = 20): List<SongSearchResult> = withContext(Dispatchers.IO) {
-        if (query.isBlank()) return@withContext emptyList()
+    suspend fun searchSongs(query: String, limit: Int = 20): List<SongSearchResult> {
+        return searchSongsPage(query = query, start = 0, limit = limit).items
+    }
+
+    suspend fun searchSongsPage(
+        query: String,
+        start: Int = 0,
+        limit: Int = 20
+    ): PagedResult<SongSearchResult> = withContext(Dispatchers.IO) {
+        if (query.isBlank()) return@withContext PagedResult(emptyList(), null, false)
         if (!ensureNativeAuth()) {
             Log.e(TAG, "Native authentication failed while searching songs.")
-            return@withContext emptyList()
+            return@withContext PagedResult(emptyList(), null, false)
         }
 
         val baseUrl = credentialsManager.getFullServerUrl()
+        val safeStart = start.coerceAtLeast(0)
+        val safeLimit = limit.coerceAtLeast(1)
         try {
             val encodedQuery = URLEncoder.encode(query, "UTF-8")
-            val url = URL("$baseUrl/api/song?title=$encodedQuery&_end=$limit")
+            val url = URL("$baseUrl/api/song?title=$encodedQuery&_start=$safeStart&_end=${safeStart + safeLimit}")
             val urlConnection = url.openConnection() as HttpURLConnection
             urlConnection.requestMethod = "GET"
             urlConnection.setRequestProperty("x-nd-authorization", "Bearer $nativeToken")
@@ -460,12 +534,15 @@ class NavidromeManager(
                         )
                     )
                 }
-                return@withContext results
+                val total = urlConnection.getHeaderField("X-Total-Count")?.toIntOrNull()
+                val hasMore = total?.let { safeStart + results.size < it }
+                    ?: (results.size >= safeLimit)
+                return@withContext PagedResult(results, total, hasMore)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Exception during song search", e)
         }
-        return@withContext emptyList()
+        return@withContext PagedResult(emptyList(), null, false)
     }
 
     private fun normalizeDiscNumber(value: Int): Int = if (value > 0) value else 1
@@ -623,7 +700,11 @@ class NavidromeManager(
                     artists = trackArtists,
                     number = i + 1,
                     discNumber = normalizeDiscNumber(song.optInt("discNumber", 1)),
-                    duration = song.optInt("duration", 0)
+                    duration = song.optInt("duration", 0),
+                    albumId = song.optString("albumId").ifBlank {
+                        song.optString("album_id")
+                    },
+                    albumName = song.optString("album")
                 )
             )
         }
@@ -783,7 +864,13 @@ class NavidromeManager(
                             songJson.optInt("disc_number", songJson.optInt("disc", 1))
                         )
                     ),
-                    duration = songJson.optInt("duration", 0)
+                    duration = songJson.optInt("duration", 0),
+                    albumId = songJson.optString("albumId").ifBlank {
+                        songJson.optString("album_id")
+                    },
+                    albumName = songJson.optString("album").ifBlank {
+                        songJson.optString("albumName")
+                    }
                 )
             )
         }
@@ -1126,7 +1213,13 @@ class NavidromeManager(
                             songJson.optInt("disc_number", songJson.optInt("disc", 1))
                         )
                     ),
-                    duration = songJson.optInt("duration", 0)  // usually in seconds
+                    duration = songJson.optInt("duration", 0),  // usually in seconds
+                    albumId = songJson.optString("albumId").ifBlank {
+                        songJson.optString("album_id").ifBlank { id }
+                    },
+                    albumName = songJson.optString("album").ifBlank {
+                        json.optString("name")
+                    }
                 )
             )
         }

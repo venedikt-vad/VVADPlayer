@@ -95,7 +95,7 @@ Routes are defined in `MainActivity.kt`:
 | `album/{albumId}` | `AlbumScreen` | Album detail, download controls, track list |
 | `artist/{artistId}` | `ArtistScreen` | Artist discography with tabs |
 | `queue` | `QueueScreen` | Current playback queue |
-| `settings` | `SettingsScreen` | Connection, transcoding, covers, cache |
+| `settings` | `SettingsScreen` | Connection, playback quality, homepage, navigation, cache, system |
 | `cached-albums` | `CachedAlbumsScreen` | Manage downloaded/cached albums |
 
 The full-screen `PlayerScreen` is not a navigation route. It is an `AnimatedVisibility` overlay controlled by `isPlayerVisible` in `MainActivity`.
@@ -105,7 +105,7 @@ The full-screen `PlayerScreen` is not a navigation route. It is an `AnimatedVisi
 The bottom bar contains:
 
 1. `PlayerStripe`, shown whenever a current track exists.
-2. The main `NavigationBar` with Home, Search, Albums, and Artists.
+2. The main `NavigationBar`, rendered from the persisted order and visibility preferences. Home is always present; other tabs can be reordered or hidden.
 
 The top bar height and bottom bar height are measured with `onSizeChanged`. Screens receive `topContentPadding` and `bottomContentPadding` so content can scroll behind the translucent bars.
 
@@ -114,7 +114,9 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 #### HomeScreen (`ui/screens/HomeScreen.kt`)
 
 - Polls the server and offline library every 60 seconds when online and every 15 seconds when offline.
-- Shows online sections: Available Offline, Random Albums, Recently Played, Most Played Albums, Most Played Artists.
+- Shows online sections in the order configured under Settings → Homepage: Available Offline, Random Albums, Recently Played, Most Played Albums, Most Played Artists, and Your mixes.
+- Hidden sections are skipped, and disabled sections are not fetched when practical.
+- Your mixes uses the persisted playlist-name prefix.
 - Falls back to cached albums when the network is unavailable or the server is unreachable.
 - Uses a network callback to react to connectivity changes.
 - Album and artist tiles use Coil and show a pulsing placeholder while covers load.
@@ -122,6 +124,8 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 #### SearchScreen (`ui/screens/LibraryScreens.kt`)
 
 - Searches albums, artists, and songs after a 300 ms debounce.
+- Each section has independent paging state and a Load more action; pages are deduplicated by ID.
+- A query generation token prevents stale responses from an old query from appending results.
 - Artist results are ordered as: top played non-comma artists, remaining non-comma artists alphabetically, then comma-containing artists.
 - Song results navigate to the song's album rather than starting playback directly.
 - Recent searches are persisted globally in the `search_prefs` `SharedPreferences` file: newest first, deduplicated case-insensitively, capped at 10.
@@ -135,6 +139,9 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 - List/grid toggle.
 - Preferences are stored in the `library_prefs` `SharedPreferences` file.
 - Album and artist rows/tiles open the corresponding detail screen.
+- Both screens load 100-item pages and automatically request the next page near the end of the list or grid.
+- A footer shows a spinner while loading and an end state when all items are loaded.
+- Sort/order changes start a fresh paged list and reset scroll position.
 
 #### Album cards (`ui/components/AlbumCardGestures.kt`)
 
@@ -187,7 +194,9 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 
 - Full-screen overlay over the main app.
 - Blurred cover background with dark overlay.
-- Album name and artist names are clickable.
+- The top source label is clickable: it opens the album during album playback and the playlist during playlist playback.
+- The song title opens the current track's own album, even when playback came from a playlist. The click is disabled when album metadata is missing.
+- Artist names are clickable.
 - Favorite and queue buttons.
 - Seek slider with buffered-progress indicator.
 - Previous / play-pause / next controls.
@@ -206,14 +215,15 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 
 #### SettingsScreen (`ui/screens/SettingsScreen.kt`)
 
-- Top-level category list opens submenus: Connection, Transcoding, Image Quality, Cache, System.
+- Top-level category list opens submenus: Connection, Playback Quality, Homepage, Navigation, Cache, System.
 - Submenus use the in-screen back arrow and system back to return to the category list.
 - Connection test and credential save.
-- Transcoding format and max bitrate.
-- Small/large cover art sizes.
+- Playback Quality combines streaming format, max bitrate, and small/large cover sizes in equal-width option rows. Unlimited bitrate is a separate full-width option.
+- Homepage reorders and hides Home rows and hosts the Your mixes playlist-name prefix.
+- Navigation reorders and hides bottom tabs; Home cannot be hidden. Reset restores the default order and visibility.
 - Navigate to cached albums.
 - Clear all cached tracks.
-- System submenu controls vibration feedback on/off, Light/Medium/Strong intensity, and a test action.
+- System controls vibration feedback on/off, Light/Medium/Strong intensity, a test action, and the primary accent color.
 - Vibration settings are exposed through `LocalAppHaptics` in `ui/components/AppHaptics.kt`; all app haptics respect them.
 
 #### CachedAlbumsScreen (`ui/screens/CachedAlbumsScreen.kt`)
@@ -250,6 +260,10 @@ The top bar height and bottom bar height are measured with `onSizeChanged`. Scre
 | `currentAlbumId` | Album ID for the current track |
 | `currentAlbumName` | Album name for the player UI |
 | `currentCoverArtUrl` | Cover URL for the current track |
+| `currentSourceType` | Playback source type: `album` or `playlist` |
+| `currentSourceId` | Album or playlist ID for the playback source |
+| `currentSourceName` | Album or playlist name shown at the top of the player |
+| `currentSourceCoverArtUrl` | Cover URL for the playback source |
 | `isPlaying` | Play/pause state |
 | `currentPosition` | Current playback position in ms |
 | `bufferedPosition` | Buffered position in ms |
@@ -264,9 +278,15 @@ data class QueueEntry(
     val albumId: String,
     val albumName: String,
     val coverArtUrl: String,
-    val queueId: String = UUID.randomUUID().toString()
+    val queueId: String = UUID.randomUUID().toString(),
+    val sourceType: String = SOURCE_ALBUM,
+    val sourceId: String = albumId,
+    val sourceName: String = albumName,
+    val sourceCoverArtUrl: String = coverArtUrl
 )
 ```
+
+The entry's `albumId`/`albumName` always describe the track's own album. `sourceId`/`sourceName` describe what the user is playing from. For playlist playback, the source is the playlist and each entry keeps the album metadata parsed for that track.
 
 #### Media item construction
 
@@ -282,9 +302,11 @@ data class QueueEntry(
 
 | Function | Behavior |
 |---|---|
-| `replaceQueue(tracks, startIndex, albumId, albumName, coverArtUrl)` | Replaces the queue with all tracks from one album, selects `startIndex`, resets ExoPlayer media items, and starts playback. |
+| `replaceQueue(tracks, startIndex, albumId, albumName, coverArtUrl)` | Replaces the queue from an album, selects `startIndex`, resets ExoPlayer media items, and starts playback. Optional source parameters allow playlist sources. |
+| `replacePlaylistQueue(tracks, startIndex, playlistId, playlistName, coverArtUrl)` | Replaces the queue from a playlist while preserving each track's own album metadata. |
 | `appendToQueue(track, ...)` / `appendAlbumToQueue(tracks, ...)` | Appends one track or an album to the end. If the queue is empty, replaces the queue with those tracks. |
 | `queueNext(track, ...)` / `queueAlbumNext(tracks, ...)` | Inserts one track or an album immediately after the current queue index. |
+| `queueNextFromPlaylist(...)` / `appendPlaylistTrackToQueue(...)` | Queue-next or append a playlist track while keeping its album and playlist source context. |
 | `removeQueueItem(queueId)` / `removeQueueItemAt(index)` | Removes a specific queue entry by stable identity. Refuses to remove the current entry. Syncs the ExoPlayer media item. |
 | `moveQueueItem(fromIndex, toIndex)` | Moves a queue entry and its ExoPlayer media item, keeping the current index aligned. Returns `false` when unsupported or invalid. |
 | `clearQueueExceptCurrent()` | Rebuilds the queue and ExoPlayer media items with only the current track. |
@@ -379,6 +401,10 @@ Key settings:
 - Cache size in MB, with `-1` representing unlimited.
 - Vibration feedback enabled flag.
 - Vibration intensity level (`1` light, `2` medium, `3` strong).
+- Playlist-name prefix for the Your mixes Home row.
+- Homepage row order and hidden-row keys.
+- Primary accent color key.
+- Bottom-navigation item order and hidden-item keys.
 
 Defaults:
 
@@ -388,6 +414,9 @@ Defaults:
 - Large cover: 800 px.
 - Cache size: 512 MB.
 - Vibration feedback: enabled, medium intensity.
+- Homepage rows: Available Offline, Random Albums, Recently Played, Most Played Albums, Most Played Artists, Your mixes.
+- Primary color: Default Red (`#950400`).
+- Bottom navigation: Home, Search, Albums, Playlists, Artists.
 
 ### OfflineLibraryManager (`data/OfflineLibraryManager.kt`)
 
@@ -466,11 +495,11 @@ Two authentication paths coexist:
 | Purpose | Endpoint |
 |---|---|
 | Connection test | Subsonic `/rest/ping` |
-| Albums | `/api/album?_sort=...&_order=...&_end=...` |
-| Artists | `/api/artist?_sort=...&_order=...&_end=...` |
-| Album search | `/api/album?name=...` |
-| Artist search | `/api/artist?name=...` |
-| Song search | `/api/song?title=...` |
+| Albums | `/api/album?_sort=...&_order=...&_start=...&_end=...` |
+| Artists | `/api/artist?_sort=...&_order=...&_start=...&_end=...` |
+| Album search | `/api/album?name=...&_start=...&_end=...` |
+| Artist search | `/api/artist?name=...&_start=...&_end=...` |
+| Song search | `/api/song?title=...&_start=...&_end=...` |
 | Album detail | `/api/album/{id}` |
 | Album songs | `/api/song?album_id=...&_end=500` |
 | Artist detail | `/api/artist/{id}` |
@@ -479,6 +508,8 @@ Two authentication paths coexist:
 | Recently played albums | `/api/album?_sort=play_date&_order=DESC&recently_played=true` |
 | Most played albums | `/api/album?_sort=play_count&_order=DESC` |
 | Most played artists | `/api/artist?_sort=play_count&_order=DESC` |
+
+Album, artist, and search paging methods return `PagedResult(items, total, hasMore)`. `X-Total-Count` is used when present; otherwise a full page means there may be another page. Existing non-paged helpers delegate to the first page.
 
 ### Subsonic endpoints used
 
@@ -494,7 +525,8 @@ Two authentication paths coexist:
 
 - `parseAlbumList` fills album ID, name, album artist, year, play count, play date, song count, duration, and creation date.
 - `parseArtistAlbums` also fills `songCount` so one-track albums can be classified as singles.
-- `parseTracks` reads track ID, title, artists, track number, disc number, and duration, normalizes missing/zero disc numbers to 1, then sorts by disc number and track number.
+- `parseTracks` reads track ID, title, artists, album ID/name, track number, disc number, and duration, normalizes missing/zero disc numbers to 1, then sorts by disc number and track number.
+- Playlist parsers (`parseSubsonicPlaylist` and the native playlist paths) preserve each entry's album ID and album name so playlist playback can still open the correct album.
 - Disc numbers use `discNumber` → `disc_number` → `disc` fallbacks.
 - `getAlbum` attempts the network first and falls back to the cached album.
 - Native token expiration is not proactively refreshed; failed requests return `null`/empty results and are logged.
@@ -505,14 +537,15 @@ Two authentication paths coexist:
 |---|---|
 | `Album` | `id`, `name`, `artist`, `artistId`, `coverArtUrl`, `year`, `type`, `playCount`, `playDate`, `songCount`, `duration`, `createdAt`, `albumCount` |
 | `AlbumDetails` | `id`, `name`, `artist`, `artistId`, `artists`, `year`, `coverArtUrl`, `tracks` |
-| `Track` | `id`, `title`, `artists`, `number`, `discNumber`, `duration` |
+| `Track` | `id`, `title`, `artists`, `number`, `discNumber`, `duration`, `albumId`, `albumName` |
 | `TrackArtist` | `id`, `name` |
 | `ArtistDetails` | `id`, `name`, `coverArtUrl`, `albums` |
 | `SongSearchResult` | `id`, `title`, `artist`, `artistId`, `album`, `albumId`, `coverArtUrl`, `duration` |
 
 ## 10. Theming and UI conventions
 
-- Primary accent: `VVADRed` (`#950400`).
+- Default accent: Default Red (`#950400`), the original `VVADRed`.
+- The accent is configurable in Settings → System and is persisted in DataStore. `VVADPlayerTheme` applies it to `primary`, `primaryContainer`, and `tertiary`, with `onPrimary` chosen from luminance.
 - Dark theme is the main visual direction: black background, near-black surfaces, white text.
 - Light theme exists but the app forces black system bars.
 - Material 3 components are used throughout.
@@ -526,22 +559,26 @@ Two authentication paths coexist:
 Implemented:
 
 - Navidrome connection test and credential storage.
-- Home feed with random, recent, and most-played content.
-- Album and artist browsing with sorting and list/grid layouts.
+- Home feed with random, recent, most-played, and Your mixes content, with configurable row order and visibility.
+- Album and artist browsing with sorting, list/grid layouts, and infinite scroll.
+- Search result pagination with independent per-section Load more actions.
 - Album detail with download/offline controls.
 - Artist detail with Albums / Singles & EPs / Featured In tabs.
 - Playback through ExoPlayer and MediaSession.
 - Foreground playback notification with transport controls.
 - Playback queue: replace, append, queue-next, album card double-tap/long-press queue actions, seek, remove, drag reorder, clear.
+- Playlist playback with per-track album links and playlist/album-aware player navigation.
 - Stable queue identity for duplicate tracks.
 - Favorites via Subsonic star/unstar with immediate UI updates.
 - Scrobbling after 30 seconds.
 - Streaming cache.
 - Offline album download, cache management, and offline playback.
 - Download progress notification.
-- Transcoding format/bitrate settings.
-- Cover-size and cache-management settings.
-- Category-based settings submenus with configurable vibration on/off and intensity.
+- Combined Playback Quality settings for format, bitrate, and cover sizes.
+- Cache-management settings.
+- Category-based settings submenus: Connection, Playback Quality, Homepage, Navigation, Cache, System.
+- Configurable vibration on/off, intensity, and primary accent color.
+- Configurable Home rows and bottom-navigation order/visibility.
 - Global search history with per-entry removal and clear-all.
 - Player bar swipe-to-skip and player screen swipe-down-to-close.
 - Data-driven one-track single detection.
@@ -549,7 +586,7 @@ Implemented:
 
 Not implemented:
 
-- Server-side playlists or playlist screens.
+- Server-side playlist editing.
 - Queue/download persistence across process death.
 - Automated UI test coverage beyond existing unit/template tests.
 

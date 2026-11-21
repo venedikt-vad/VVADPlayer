@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import com.vvad.vp.data.HomeRow
 import com.vvad.vp.data.NavidromeManager
 import com.vvad.vp.data.OfflineLibraryManager
 import com.vvad.vp.ui.components.PlaylistCover
@@ -64,20 +65,44 @@ fun HomeScreen(
     var homeMode by remember { mutableStateOf(HomeMode.Online) }
 
     val playlistPrefix by navidromeManager.credentialsManager.playlistPrefix.collectAsState(initial = "")
+    val homeRowOrder by navidromeManager.credentialsManager.homeRowOrder.collectAsState(initial = HomeRow.entries.toList())
+    val hiddenHomeRows by navidromeManager.credentialsManager.homeHiddenRows.collectAsState(initial = emptySet())
+    val visibleHomeRows = remember(homeRowOrder, hiddenHomeRows) {
+        homeRowOrder.filterNot { it in hiddenHomeRows }
+    }
     val isNetworkAvailable by rememberNetworkAvailability()
 
-    LaunchedEffect(isNetworkAvailable, playlistPrefix) {
+    LaunchedEffect(isNetworkAvailable, playlistPrefix, visibleHomeRows) {
         while (true) {
             offlineAlbums = offlineLibraryManager.getOfflineAlbums()
 
             if (isNetworkAvailable) {
-                val fetchedAlbums = navidromeManager.getRandomAlbums(limit = 10)
-                recentlyPlayed = navidromeManager.getRecentlyPlayedAlbums(limit = 8)
-                mostPlayedAlbums = navidromeManager.getMostPlayedAlbums(limit = 8)
-                mostPlayedArtists = navidromeManager.getMostPlayedArtists(limit = 8)
-                yourMixes = navidromeManager.getPlaylistsByPrefix(playlistPrefix, limit = 12)
-
-                randomAlbums = if (fetchedAlbums.isNotEmpty()) fetchedAlbums else emptyList()
+                val rows = visibleHomeRows
+                randomAlbums = if (HomeRow.RANDOM_ALBUMS in rows) {
+                    navidromeManager.getRandomAlbums(limit = 10)
+                } else {
+                    emptyList()
+                }
+                recentlyPlayed = if (HomeRow.RECENTLY_PLAYED in rows) {
+                    navidromeManager.getRecentlyPlayedAlbums(limit = 8)
+                } else {
+                    emptyList()
+                }
+                mostPlayedAlbums = if (HomeRow.MOST_PLAYED_ALBUMS in rows) {
+                    navidromeManager.getMostPlayedAlbums(limit = 8)
+                } else {
+                    emptyList()
+                }
+                mostPlayedArtists = if (HomeRow.MOST_PLAYED_ARTISTS in rows) {
+                    navidromeManager.getMostPlayedArtists(limit = 8)
+                } else {
+                    emptyList()
+                }
+                yourMixes = if (HomeRow.YOUR_MIXES in rows) {
+                    navidromeManager.getPlaylistsByPrefix(playlistPrefix, limit = 12)
+                } else {
+                    emptyList()
+                }
                 homeMode = HomeMode.Online
             } else {
                 yourMixes = emptyList()
@@ -139,65 +164,86 @@ fun HomeScreen(
                 }
             }
         } else {
-            // Available Offline
-            if (offlineAlbums.isNotEmpty()) {
-                item { Text("Available Offline", style = MaterialTheme.typography.titleLarge) }
-                item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        items(offlineAlbums, key = { it.id }, contentType = { "album" }) { album ->
-                            AlbumTile(
-                                album = album,
-                                onAlbumClick = { onAlbumClick(album.id) },
-                                onArtistClick = {
-                                    if (album.artistId.isNotBlank()) onArtistClick(album.artistId)
-                                },
-                                onPlayNext = { onAlbumPlayNext(album) },
-                                onAddToQueue = { onAlbumAddToQueue(album) }
+            visibleHomeRows.forEach { row ->
+                when (row) {
+                    HomeRow.AVAILABLE_OFFLINE -> {
+                        if (offlineAlbums.isNotEmpty()) {
+                            item { Text(row.label, style = MaterialTheme.typography.titleLarge) }
+                            item {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    items(offlineAlbums, key = { it.id }, contentType = { "album" }) { album ->
+                                        AlbumTile(
+                                            album = album,
+                                            onAlbumClick = { onAlbumClick(album.id) },
+                                            onArtistClick = {
+                                                if (album.artistId.isNotBlank()) onArtistClick(album.artistId)
+                                            },
+                                            onPlayNext = { onAlbumPlayNext(album) },
+                                            onAddToQueue = { onAlbumAddToQueue(album) }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    HomeRow.RANDOM_ALBUMS -> {
+                        if (randomAlbums.isNotEmpty()) {
+                            randomAlbumsSection(
+                                randomAlbums,
+                                onAlbumClick,
+                                onArtistClick,
+                                onAlbumPlayNext,
+                                onAlbumAddToQueue
                             )
                         }
                     }
-                }
-            }
 
-            randomAlbumsSection(
-                randomAlbums,
-                onAlbumClick,
-                onArtistClick,
-                onAlbumPlayNext,
-                onAlbumAddToQueue
-            )
-            if (recentlyPlayed.isNotEmpty()) {
-                section(
-                    "Recently Played",
-                    recentlyPlayed,
-                    onAlbumClick,
-                    onArtistClick,
-                    onAlbumPlayNext,
-                    onAlbumAddToQueue
-                )
-            }
-            if (mostPlayedAlbums.isNotEmpty()) {
-                section(
-                    "Most Played Albums",
-                    mostPlayedAlbums,
-                    onAlbumClick,
-                    onArtistClick,
-                    onAlbumPlayNext,
-                    onAlbumAddToQueue
-                )
-            }
-            if (mostPlayedArtists.isNotEmpty()) {
-                artistsSection(mostPlayedArtists, onArtistClick)
-            }
-            if (yourMixes.isNotEmpty()) {
-                item { Text("Your mixes", style = MaterialTheme.typography.titleLarge) }
-                item {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        items(yourMixes, key = { "mix-${it.id}" }, contentType = { "playlist" }) { playlist ->
-                            PlaylistTile(
-                                playlist = playlist,
-                                onClick = { onPlaylistClick(playlist.id) }
+                    HomeRow.RECENTLY_PLAYED -> {
+                        if (recentlyPlayed.isNotEmpty()) {
+                            section(
+                                row.label,
+                                recentlyPlayed,
+                                onAlbumClick,
+                                onArtistClick,
+                                onAlbumPlayNext,
+                                onAlbumAddToQueue
                             )
+                        }
+                    }
+
+                    HomeRow.MOST_PLAYED_ALBUMS -> {
+                        if (mostPlayedAlbums.isNotEmpty()) {
+                            section(
+                                row.label,
+                                mostPlayedAlbums,
+                                onAlbumClick,
+                                onArtistClick,
+                                onAlbumPlayNext,
+                                onAlbumAddToQueue
+                            )
+                        }
+                    }
+
+                    HomeRow.MOST_PLAYED_ARTISTS -> {
+                        if (mostPlayedArtists.isNotEmpty()) {
+                            artistsSection(mostPlayedArtists, onArtistClick)
+                        }
+                    }
+
+                    HomeRow.YOUR_MIXES -> {
+                        if (yourMixes.isNotEmpty()) {
+                            item { Text(row.label, style = MaterialTheme.typography.titleLarge) }
+                            item {
+                                LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                                    items(yourMixes, key = { "mix-${it.id}" }, contentType = { "playlist" }) { playlist ->
+                                        PlaylistTile(
+                                            playlist = playlist,
+                                            onClick = { onPlaylistClick(playlist.id) }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

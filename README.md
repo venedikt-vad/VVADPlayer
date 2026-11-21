@@ -17,6 +17,9 @@ VP is a native Android client for [Navidrome](https://www.navidrome.org/) music 
 - **Background Playback** — Full Media3/ExoPlayer support with notification controls
 - **Queue Management** — Album queue actions, explicit remove, drag reorder, and hold-track append
 - **Search History** — Recent queries persisted per device with quick reuse and removal
+- **Paged Library** — Infinite scroll for albums and artists, plus per-section load more in search
+- **Customizable Home** — Reorder or hide Home rows and filter the Your mixes row by playlist prefix
+- **Personal Appearance** — Choose the app accent color and reorder or hide bottom-navigation tabs
 
 ---
 
@@ -27,7 +30,8 @@ VP is a native Android client for [Navidrome](https://www.navidrome.org/) music 
 - **Seek Bar** - Scrub through tracks with haptic feedback
 - **Swipe Down** - Close the player
 - **Queue Button** - Opens full queue management
-- **Song name** - Opens album
+- **Song name** - Opens the current track's own album, including during playlist playback
+- **Playlist or album name at the top** - Opens the current playback source
 - **Artist name** - Opens artist
 
 ### Mini Player
@@ -50,12 +54,20 @@ VP is a native Android client for [Navidrome](https://www.navidrome.org/) music 
 - **Drag handle** — Long-press and drag to reorder, with auto-scroll
 - **Clear Queue** — Keep only the current track
 
+### Albums and Artists
+- **Infinite scroll** - More albums and artists load automatically near the end of the list or grid.
+- **Sorting and layout** - Changing sort order or list/grid layout starts a fresh paged list.
+
 ### Search
 - **Recent searches** — Persisted per device; tap to reuse, remove individual entries, or clear all.
+- **Load more** - Each result section can load additional albums, artists, or songs independently.
 
 ### Settings
-- **Categories** - Connection, Transcoding, Image Quality, Cache, and System each open their own submenu.
-- **System** - Toggle vibration feedback, choose Light/Medium/Strong intensity, or test the current setting.
+- **Categories** - Connection, Playback Quality, Homepage, Navigation, Cache, and System each open their own submenu.
+- **Playback Quality** - Streaming format, bitrate, and small/large cover sizes in one place.
+- **Homepage** - Reorder or hide Home rows and set the playlist name prefix for Your mixes.
+- **Navigation** - Reorder or hide bottom tabs. Home is always visible.
+- **System** - Toggle vibration feedback, choose Light/Medium/Strong intensity, test the current setting, or select the app accent color.
 
 ---
 

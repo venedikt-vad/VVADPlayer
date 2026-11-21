@@ -34,7 +34,6 @@ import androidx.activity.compose.BackHandler
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
 import com.vvad.vp.data.PlaybackManager
-import com.vvad.vp.ui.theme.VVADRed
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -44,12 +43,14 @@ import androidx.compose.runtime.setValue
 fun PlayerScreen(
     playbackManager: PlaybackManager,
     onAlbumClick: (String) -> Unit,
+    onPlaylistClick: (String) -> Unit,
     onArtistClick: (String) -> Unit,
     onClose: () -> Unit,
     onQueueClick: () -> Unit = {}
 ) {
     val track = playbackManager.currentTrack ?: return
     val currentAlbumId = playbackManager.currentAlbumId
+    val currentSourceId = playbackManager.currentSourceId
     val interactionSource = remember { MutableInteractionSource() }
 
     val dismissThresholdPx = with(LocalDensity.current) { 120.dp.toPx() }
@@ -157,14 +158,20 @@ fun PlayerScreen(
                 }
 
                 MarqueeText(
-                    text = playbackManager.currentAlbumName,
+                    text = playbackManager.currentSourceName,
                     style = MaterialTheme.typography.titleMedium,
                     color = Color.White.copy(alpha = 0.7f),
                     modifier = Modifier
                         .weight(1f)
                         .let { base ->
-                            if (!currentAlbumId.isNullOrBlank()) {
-                                base.clickable { onAlbumClick(currentAlbumId) }
+                            if (!currentSourceId.isNullOrBlank()) {
+                                base.clickable {
+                                    if (playbackManager.currentSourceType == PlaybackManager.SOURCE_PLAYLIST) {
+                                        onPlaylistClick(currentSourceId)
+                                    } else {
+                                        onAlbumClick(currentSourceId)
+                                    }
+                                }
                             } else {
                                 base
                             }
@@ -246,7 +253,11 @@ fun PlayerScreen(
                     Icon(
                         imageVector = if (playbackManager.isCurrentTrackFavorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
                         contentDescription = "Favorite",
-                        tint = if (playbackManager.isCurrentTrackFavorite) VVADRed else Color.White.copy(alpha = 0.7f)
+                        tint = if (playbackManager.isCurrentTrackFavorite) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            Color.White.copy(alpha = 0.7f)
+                        }
                     )
                 }
                 IconButton(onClick = { onQueueClick() }) {
@@ -272,8 +283,8 @@ fun PlayerScreen(
                             .fillMaxWidth()
                             .padding(horizontal = trackHorizontalInset)
                             .height(4.dp),
-                        color = VVADRed.copy(alpha = 0.35f),
-                        trackColor = VVADRed.copy(alpha = 0.14f)
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+                        trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
                     )
                     Slider(
                         value = sliderPosition.coerceIn(0f, sliderRangeMax),
@@ -288,8 +299,8 @@ fun PlayerScreen(
                         modifier = Modifier.fillMaxWidth(),
                         valueRange = 0f..sliderRangeMax,
                         colors = SliderDefaults.colors(
-                            thumbColor = VVADRed,
-                            activeTrackColor = VVADRed,
+                            thumbColor = MaterialTheme.colorScheme.primary,
+                            activeTrackColor = MaterialTheme.colorScheme.primary,
                             inactiveTrackColor = Color.Transparent
                         )
                     )

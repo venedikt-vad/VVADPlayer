@@ -1,571 +1,575 @@
-# VVAD Player — Work Plan: Fixes and Features
+# VVAD Player — Work Plan: Pagination, Settings, and Player Links
 
-> Status: planning only. No source code is changed by this document.
-> Architecture reference: [ARCHITECTURE.md](ARCHITECTURE.md)
+> Status: implemented. This document is retained as the implementation plan and verification checklist.
+> Current shipped behavior is documented in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## 1. Confirmed decisions
+## 1. Requested items
+
+| ID | Item | Area | Effort |
+|---|---|---|---|
+| WP-01 | Clicking a song name while playing from a playlist opens the wrong route; clicking the playlist name on the player opens the wrong route | Playback / Player | M |
+| WP-02 | Add server-side pagination to album, artist, and search APIs | Data | M |
+| WP-03 | Add infinite scroll to Albums and Artists screens | UI | M |
+| WP-04 | Add pagination controls to Search results | UI | M |
+| WP-05 | Make vibration intensity setting actually change haptics | Settings / Haptics | S |
+| WP-06 | Add configurable homepage row order/visibility and move the home-mixes prefix setting there | Home / Settings | M |
+| WP-07 | Merge Transcoding and Image Quality settings; make option buttons fill width and move Unlimited to its own line | Settings UI | S |
+| WP-08 | Add a primary/accent color setting under System | Theme / Settings | M |
+| WP-09 | Add bottom-nav customization: reorder, hide, Home protected | Navigation / Settings | M |
+| WP-10 | Build, regression-test, and update README/ARCHITECTURE | Verification / Docs | M |
+
+## 2. Approach decisions
 
 | Topic | Decision |
 |---|---|
-| “Playlist” | Means the current playback queue (`QueueScreen`). The app does not currently support server-side Navidrome playlists. |
-| Album queueing | Support both **Play next** and **Add to queue** for a whole album. |
-| Queue removal | Show an explicit remove button. The currently playing queue item remains protected from removal. |
-| Reorder implementation | Manual drag-and-drop with a drag handle, no new dependency. Analysis and fallback are below. |
-| Search history | Global per device, not per server/account. |
-| Singles | Albums with exactly one track are treated as singles. |
-| Player bar swipe | Swipe left = next, swipe right = previous. |
-| Player screen close | Swipe down closes the full-screen player. |
-| Queue reorder meaning | Reorder the current playback queue, not a server playlist. |
-
-## 2. Reorder approach analysis
-
-Two options were considered for queue drag-and-drop.
-
-### Option A — Manual Compose drag handle (selected)
-
-**How:** Add a drag handle to each queue row. Track the dragged item and offset with Compose gesture APIs. Use `LazyListState.layoutInfo` to find the target index, call a new `PlaybackManager.moveQueueItem(from, to)`, and keep ExoPlayer in sync with `moveMediaItem`.
-
-**Pros:**
-- No new third-party dependency.
-- Full control over the drag handle, haptics, visuals, and current-track protection.
-- Works well for this screen: one homogeneous `LazyColumn`, fixed-height rows, no grids or sections.
-- Avoids version-compatibility risk with the project's pinned Compose BOM `2024.06.00` and Kotlin `1.9.24`.
-
-**Cons:**
-- More custom code than using a library.
-- Auto-scroll near the top/bottom edges must be implemented manually.
-- Item movement animations require extra care.
-- Gesture edge cases need manual testing.
-
-### Option B — Third-party reorderable library
-
-**Example:** `sh.calvin.reorderable:reorderable`.
-
-**Pros:**
-- Less custom gesture code.
-- Auto-scroll, reorder state, and animations are handled by the library.
-- Generally more polished out of the box.
-
-**Cons:**
-- Adds a dependency and a maintenance/compatibility surface.
-- The library version must match the app's Compose and Kotlin versions.
-- More risk for a small app whose queue screen is structurally simple.
-
-### Decision
-
-Use **Option A: manual drag handle** first.
-
-Rationale: the queue is a single fixed-row `LazyColumn`, and keeping the dependency surface small matters more than saving a moderate amount of code. If manual reordering cannot deliver smooth auto-scroll and item animation during implementation, fall back to a reorderable library instead of shipping a janky interaction.
+| Pagination transport | Use Navidrome's native `_start` / `_end` query parameters. Read `X-Total-Count` when present; otherwise stop when a page is short or empty. |
+| Albums/Artists paging | Infinite scroll in both list and grid modes, with a footer spinner and a graceful end state. |
+| Search paging | Per-section **Load more** actions. Search results are heterogeneous (artists are a horizontal row), so automatic combined infinite scroll is less predictable. |
+| Player link fix | Track the song's album separately from the playback source (album or playlist). Extend `Track` with album identity, and carry source context on queue entries. |
+| Homepage customization | Persist row order and hidden rows. Use up/down reorder controls, not drag-and-drop, to keep the settings UI simple and reliable. |
+| Settings grouping | Replace `TRANSCODING` and `IMAGE_QUALITY` with one `PLAYBACK_QUALITY` category. Move playlist prefix into a new `HOMEPAGE` category. |
+| Primary color | Persist an ARGB value in DataStore, apply it through `VVADPlayerTheme`, and remove hardcoded `VVADRed` usages from screens. Choose `onPrimary` automatically from luminance. |
+| Bottom navigation | Persist order and hidden routes. Home is always visible and cannot be hidden. |
+| Haptics | Map intensity to both amplitude and duration/waveform, and use distinct durations as a fallback on devices without amplitude control. |
 
 ## 3. Scope
 
 In scope:
 
-1. Observable favorites / list hearts.
-2. Centered multiline album title.
-3. Queue reordering.
-4. Queue remove button instead of swipe.
-5. Album-level queue actions: Play next and Add to queue.
-6. Player bar swipe to skip.
-7. Player screen swipe down to close.
-8. Global search history.
-9. One-track albums detected as singles.
-10. Multi-disc album display hardening.
-11. Reliable double-tap queue-next behavior.
-12. Verification and documentation updates.
+1. Player screen album/playlist link correctness.
+2. Paged album and artist APIs.
+3. Albums/Artists infinite scroll.
+4. Search per-section pagination.
+5. Working vibration intensity.
+6. Configurable homepage rows and relocation of the playlist prefix setting.
+7. Combined playback-quality settings with improved option layout.
+8. Configurable primary color.
+9. Configurable bottom navigation.
+10. Verification and documentation updates.
 
 Out of scope:
 
-- Server-side Navidrome playlist browsing, creation, or reordering.
-- A full MVVM/DI refactor.
-- Persisting the queue across process death.
-- Persisting download jobs across process death.
-- Automated UI test suite.
+- Server-side playlist editing.
+- A ViewModel/DI refactor.
+- Offline pagination (offline views still show local cached albums).
+- Persisting the playback or download queue across process death.
+- Replacing DataStore with another settings store.
+- Redesigning the Settings screen navigation model.
 
 ## 4. Work breakdown
 
-### Phase 0 — Baseline and verification setup
+### Phase 0 — Baseline
 
-**WP-00 — Capture baseline and test targets**
+**WP-00 — Capture current behavior and test targets**
 
-- Build the current app and record current behavior for each item.
-- Capture raw album JSON for a multi-disc album and a one-track album to confirm field names (`discNumber`, `songCount`, etc.).
+- Build the current app and record the exact broken behaviors:
+  - Player song-title tap while playing from a playlist.
+  - Player top-title tap while playing from a playlist.
+  - Large album/artist libraries and broad searches.
+- Prepare test data:
+  - A library or filter with more than 100 albums and more than 100 artists.
+  - A search query that returns more than the current caps.
+  - A multi-track playlist and a multi-disc album.
+  - A device/emulator with amplitude-capable vibration and, if possible, one without.
 - Define a manual test matrix covering:
-  - Album list favorites.
-  - Current and non-current queue items.
-  - Duplicate tracks in the queue.
-  - Album queueing from empty and non-empty queue states.
-  - Swipe/tap/seek gesture conflicts.
-  - Search history after restart.
-  - Singles tab classification.
-  - Multi-disc headers.
-  - Double-tap on current and non-current tracks.
-- Effort: S.
-- Files: none.
+  - Player links from album playback and playlist playback.
+  - Album/artist list and grid pagination, sorting during load, and end-of-list.
+  - Search load-more per section and query changes mid-load.
+  - Vibration off/on, Light/Medium/Strong, and test button.
+  - Homepage row reorder, hide, restore, and app restart.
+  - Settings category layout on a narrow screen.
+  - Primary color changes across player, lists, settings, and selection controls.
+  - Navbar reorder, hide, restart, and attempting to hide Home.
+- Effort: S. Files: none.
 
-### Phase 1 — Core state and queue foundations
+### Phase 1 — Playback identity and player links
 
-**WP-01 — Make favorites observable**
+**WP-01 — Fix player album/playlist links**
 
-**Root cause:** `favoriteTrackIds` in `PlaybackManager.kt:82` is a plain `mutableSetOf`. Compose does not observe it, so `isTrackFavorite()` in list rows does not trigger recomposition. Only `isCurrentTrackFavorite` is observable.
+**Root cause:**
 
-**Work:**
-- Replace the set with observable state, e.g. `mutableStateMapOf<String, Boolean>` or `mutableStateOf<Set<String>>`.
-- Make `isTrackFavorite(trackId)` read observable state.
-- Make `toggleFavorite(track)` update optimistically and roll back if the star/unstar request fails.
-- Update the initial `getStarredTrackIds()` load to update the same observable state.
-- Keep `isCurrentTrackFavorite` synchronized for the player screen.
-
-**Files:**
-- `data/PlaybackManager.kt` (`:82-85`, `:190-196`, `:410-430`)
-- `ui/screens/AlbumScreen.kt` (`:493-508`)
-- `ui/screens/PlayerScreen.kt` (`:197-205`)
-
-**Acceptance:**
-- Toggling a heart in an album list updates immediately.
-- The heart state stays correct after scrolling and after app restart.
-- Star/unstar failure restores the previous visual state.
-- Player screen and list hearts agree for the current track.
-
-**Depends on:** none. **Effort:** S.
-
----
-
-**WP-02 — Refactor queue identity and queue operations**
-
-**Root cause:** queue entries are identified only by track ID. Duplicate tracks break removal, and queue list keys include the index, which is unstable during reordering. Compose queue state and ExoPlayer media items are also updated separately.
+- Playlist playback calls `replaceQueue(tracks, selectedIndex, playlistId, playlistName, coverUrl)` in `MainActivity.kt:477-485`.
+- `PlaybackManager` stores that single ID as the album ID for every queue entry (`PlaybackManager.kt:271-278`).
+- `PlayerScreen` uses `currentAlbumId` for both the top title and the song title (`PlayerScreen.kt:159-206`).
+- Therefore, while playing from a playlist, both clicks navigate to `album/<playlistId>`, which is not an album.
+- `Track` has no album identity (`ui/models/Album.kt:30-37`), and the playlist parsers discard per-song album IDs (`NavidromeManager.kt:571-629`).
 
 **Work:**
-- Add a stable `queueId` to `PlaybackManager.QueueEntry`.
-- Use `queueId` for queue row keys and for remove/reorder operations.
-- Add helpers:
-  - `removeQueueItem(queueId)` or `removeQueueItemAt(index)`.
-  - `moveQueueItem(from, to)`.
-  - `appendAlbumToQueue(tracks, albumId, albumName, coverArtUrl)`.
-  - `queueAlbumNext(tracks, albumId, albumName, coverArtUrl)`.
-- Keep ExoPlayer synchronized:
-  - Remove: `removeMediaItem`.
-  - Move: `moveMediaItem`.
-  - Append: `addMediaItem`.
-  - Queue next: `addMediaItem` at the correct insertion index.
-- Recompute `currentQueueIndex` from the currently playing queue entry after mutations.
-- Preserve current-track protection: the UI must not remove the current item.
-- Handle empty queue transitions predictably:
-  - Add-to-queue / play-next with an empty queue starts playback from the first added track.
-- Keep duplicate tracks independently removable and reorderable.
+
+- Extend `Track` with optional `albumId`, `albumName`, and cover identity fields so playlist entries retain their own album. Keep defaults so existing constructors continue to work.
+- Populate those fields in:
+  - `parseTracks()` for native playlist/album responses.
+  - `parseSubsonicPlaylist()` for Subsonic playlist entries.
+  - Any other track parser that receives `albumId` / `album_id` / `album`.
+- Separate the **track's album** from the **playback source**:
+  - Add source context to `QueueEntry` (source type, source ID, source name, source cover).
+  - Source types: `album` and `playlist`.
+  - Album queueing keeps today's behavior: source = the album, track album = the album.
+  - Playlist queueing uses source = the playlist, but each entry's album = the track's own album.
+- Add queue APIs or optional source parameters for playlist playback:
+  - Replace queue from a playlist.
+  - Queue one playlist track next.
+  - Append one playlist track.
+- Update `PlaybackManager` state and transition handling:
+  - Expose `currentSourceId`, `currentSourceType`, `currentSourceName`.
+  - Update them in `updateCurrentTrackFromPlayer()`, `replaceQueue()`, and `clearQueueExceptCurrent()`.
+  - Preserve source and track album metadata when adding/removing/moving queue items.
+- Update `PlayerScreen`:
+  - Top title uses the playback source name.
+  - Top-title click navigates to the playlist or album according to source type.
+  - Song-title click always opens the current track's album.
+  - If the track album ID is missing, disable that click instead of navigating to a wrong route.
+- Update `MainActivity`:
+  - Add an `onPlaylistClick` callback that closes the player overlay and navigates to `playlist/<id>`.
+  - Update `PlaylistScreen` callbacks to pass playlist source context and per-track album identity.
+  - Keep album playback using the album source path.
 
 **Files:**
-- `data/PlaybackManager.kt` (`:47-52`, `:256-356`, `:446-493`)
-- `ui/screens/QueueScreen.kt`
+
+- `ui/models/Album.kt` (`:30-37`)
+- `data/NavidromeManager.kt` (`:571-646`, `:739-798`)
+- `data/PlaybackManager.kt` (`:48-54`, `:76-78`, `:222-234`, `:252-310`, `:312-398`, `:567-584`)
+- `ui/screens/PlayerScreen.kt` (`:44-50`, `:159-206`)
+- `ui/screens/PlaylistScreen.kt` (`:181-225`)
+- `MainActivity.kt` (`:463-503`, `:612-627`)
 
 **Acceptance:**
-- Two copies of the same track can be removed independently.
-- Reordering before/after the current item keeps the correct track playing.
-- Removing an item before the current one updates the current index correctly.
-- Clearing the queue still keeps only the current track.
-- Adding an album to an empty queue starts playback from the first track.
+
+- Playing from a playlist and tapping the song title opens the song's album.
+- Playing from a playlist and tapping the playlist name at the top opens that playlist.
+- Playing from an album still opens the album from both the top title and the song title.
+- Queue-next and append from a playlist keep correct album identity for later playback.
+- Missing album metadata never navigates to `album/<playlistId>`.
 
 **Depends on:** none. **Effort:** M.
 
-### Phase 2 — UI fixes and queue features
+### Phase 2 — Pagination
 
-**WP-03 — Center long multiline album titles**
+**WP-02 — Add paged album, artist, and search APIs**
 
-**Root cause:** the album title in `AlbumScreen.kt:302-306` does not set `textAlign` and does not fill the available width. Wrapped lines default to start alignment.
+**Root cause:** the native API calls currently cap results with a single `_end` parameter: albums/artists at 500 (`NavidromeManager.kt:245-293`), album search at 30, artist search at 10, and song search at 20 (`:371-421`). Playlist detail uses 500 songs and artist detail uses 200 albums. There is no continuation parameter and no total-count handling.
 
 **Work:**
-- Set `textAlign = TextAlign.Center`.
-- Use `Modifier.fillMaxWidth()` with horizontal padding so wrapped lines center within the album header.
-- Apply the same treatment to any other album-title surface that can wrap to multiple lines. One-line marquee titles are unaffected.
+
+- Add a small paging result type, e.g. `PagedResult<T>(items, total, hasMore)`.
+- Extend native album and artist queries with `start`/`limit`:
+  - `_start=<start>&_end=<start + limit>`.
+  - Keep existing callers working via default arguments.
+- Add paged search methods for albums, artists, and songs with the same `start`/`limit` pattern.
+- Parse `X-Total-Count` when the server provides it. If absent:
+  - `hasMore = items.size >= requestedLimit`.
+  - Stop after an empty page or when no new IDs were returned.
+- Keep result order consistent with the requested sort/order.
+- Deduplicate by ID in the data layer or at the first UI accumulation point.
+- Do not change the existing non-paged convenience methods unless they become unnecessary.
 
 **Files:**
-- `ui/screens/AlbumScreen.kt` (`:302-306`)
+
+- `data/NavidromeManager.kt` (`:245-293`, `:371-461`)
 
 **Acceptance:**
-- A long album title that wraps to multiple lines is visually centered.
-- Short titles remain centered and unchanged.
-- No layout regression on the cover, artist names, or year.
 
-**Depends on:** none. **Effort:** S.
+- A library with more than 500 albums/artists can be fetched page by page.
+- Search can request subsequent pages without repeating the first page.
+- `hasMore` becomes false at the true end of the result set.
+- Sort and order parameters apply to every page.
+
+**Depends on:** none. **Effort:** M.
 
 ---
 
-**WP-04 — Queue remove button instead of swipe**
+**WP-03 — Add infinite scroll to Albums and Artists screens**
+
+**Root cause:** `AlbumsScreen` and `ArtistsScreen` fetch once and render the full returned list (`LibraryScreens.kt:438-447`, `:568-577`). They cannot request more than the server cap.
 
 **Work:**
-- Remove `SwipeToDismissBox` from `QueueScreen.kt:128-164`.
-- Add a trailing delete `IconButton` to non-current rows.
-- Keep the current row protected: hide or disable its remove action.
-- Remove now-unused imports such as `SwipeToDismissBox`, `SwipeToDismissBoxValue`, and `animateColorAsState`.
-- Wire removal through the new queue operation from WP-02.
-- Ensure row click still seeks to that queue item.
+
+- Add paging state to each screen:
+  - Loaded items.
+  - Next start index.
+  - `isLoadingMore`.
+  - `hasMore`.
+  - A load generation/counter so stale responses are ignored.
+- Load the first page when the screen opens or when sort/order changes.
+- Detect near-end scrolling from both `LazyListState` and `LazyGridState` using `layoutInfo.visibleItemsInfo`.
+- Guard against duplicate concurrent loads.
+- Append new pages, deduplicate by ID, and update `hasMore`.
+- Show:
+  - A footer spinner while loading another page.
+  - A subtle end-of-list state when all items are loaded.
+  - A retry row if a page fails and `hasMore` is still true.
+- Reset the list and scroll position when sort or order changes, as today.
+- Keep layout switching (list/grid) without losing already-loaded items.
 
 **Files:**
-- `ui/screens/QueueScreen.kt`
+
+- `ui/screens/LibraryScreens.kt` (`:413-543`, `:546-668`)
 
 **Acceptance:**
-- Every removable row has a clear delete button.
-- The current row has no active remove action.
-- Removing a row does not seek or start playback accidentally.
-- Removing the last removable row leaves the current track intact.
 
-**Depends on:** WP-02. **Effort:** S.
-
----
-
-**WP-05 — Queue drag-to-reorder**
-
-**Decision:** manual drag handle, no new dependency unless implementation quality is insufficient.
-
-**Work:**
-- Add a drag handle (`Icons.Default.DragHandle`) to queue rows.
-- Implement drag detection on the handle with `pointerInput` / `detectDragGesturesAfterLongPress`.
-- Track:
-  - Dragged queue ID.
-  - Drag offset.
-  - Current target index from `LazyListState.layoutInfo.visibleItemsInfo`.
-- On target change, call `PlaybackManager.moveQueueItem(from, to)`.
-- Implement auto-scroll when dragging near the top or bottom edge.
-- Add haptic feedback on drag start, target changes, and drop.
-- Add a visual drag state: elevation/scale/background tint on the dragged row.
-- Keep the current row movable; only removal is protected.
-- Ensure row click is not triggered by drag gestures.
-
-**Files:**
-- `ui/screens/QueueScreen.kt`
-- `data/PlaybackManager.kt` (WP-02 helpers)
-
-**Acceptance:**
-- Dragging a row changes its queue position.
-- ExoPlayer order matches the visible order.
-- The same track continues playing after moving items around it.
-- Auto-scroll works for queues longer than one screen.
-- Reordering a duplicate track moves the correct copy.
-- Tapping a row still seeks to that item.
-- Fallback: if manual drag cannot meet this quality bar, replace the custom drag implementation with a compatible reorderable library.
-
-**Depends on:** WP-02. **Effort:** L.
-
----
-
-**WP-06 — Album queueing: Play next and Add to queue**
-
-**Work:**
-- Add album-level queue actions in `AlbumScreen`, near the download control or in an overflow menu:
-  - **Play next**: insert all album tracks immediately after the current track.
-  - **Add to queue**: append all album tracks to the end.
-- Add callbacks in `MainActivity.kt:391-432`.
-- Add `PlaybackManager` methods from WP-02.
-- For an empty queue, either action starts playback from the album's first track.
-- Show brief feedback, similar to the existing download status message.
-- Preserve album track order, including multi-disc order.
-- Avoid inserting duplicate copies of the entire album when a queue action is already in progress; disable the action briefly if needed.
-
-**Files:**
-- `ui/screens/AlbumScreen.kt`
-- `MainActivity.kt`
-- `data/PlaybackManager.kt`
-
-**Acceptance:**
-- “Play next” inserts the whole album after the current track.
-- “Add to queue” appends the whole album.
-- Both work when the queue is empty.
-- Both work for multi-disc albums in disc/track order.
-- The queue screen immediately reflects the added tracks.
+- Scrolling to the bottom of Albums/Artists loads more items automatically.
+- All server items are reachable beyond the previous 500-item cap.
+- No duplicate rows appear.
+- Changing sort/order starts a fresh paginated list.
+- Both list and grid modes paginate correctly.
+- A failed page does not put the screen into a permanent loading state.
 
 **Depends on:** WP-02. **Effort:** M.
 
-### Phase 3 — Gestures
-
-**WP-07 — Player bar swipe to skip**
-
-**Work:**
-- Add horizontal drag handling to `PlayerStripe`.
-- Swipe left → `PlaybackManager.next()`.
-- Swipe right → `PlaybackManager.previous()`.
-- Use a threshold, e.g. 64–80 dp, so small movements do not skip.
-- Add a small translated/affine feedback while dragging and settle back afterward.
-- Preserve tap-to-open-player behavior.
-- Do not steal horizontal gestures from the play/pause button.
-- Consider disabling swipe when only one track is available.
-- Add optional haptic feedback on successful skip.
-
-**Files:**
-- `ui/components/PlayerStripe.kt`
-
-**Acceptance:**
-- Swiping left from the bar advances to the next track.
-- Swiping right goes to the previous track.
-- A normal tap still opens the full player.
-- Small accidental drags do not change tracks.
-- The play/pause button continues to work independently.
-
-**Depends on:** none. **Effort:** M.
-
 ---
 
-**WP-08 — Player screen swipe down to close**
+**WP-04 — Add pagination to Search results**
+
+**Root cause:** `SearchScreen` issues one fixed-size request per category and then renders only those results (`LibraryScreens.kt:170-204`, `:338-406`). Album, artist, and song results are capped at 30/10/20.
 
 **Work:**
-- Add vertical drag handling to the `PlayerScreen` root.
-- Track drag offset and animate the overlay down while dragging.
-- If the drag passes a threshold (e.g. 120 dp or 25% of screen height), call `onClose()`.
-- If below threshold, animate back to the resting position.
-- Keep the existing `BackHandler`.
-- Preserve the seek slider's horizontal drag and the play/pause controls.
-- Optionally start the drag only from the background/header to reduce accidental closes while interacting with controls.
+
+- Replace the single search request with per-category paged state:
+  - `albums`, `artists`, `songs` and their own next start / `hasMore` / loading flags.
+- Fetch the first page of all three categories after the existing 300 ms debounce.
+- Add a per-section **Load more** action:
+  - Albums: full-width action after album rows.
+  - Songs: full-width action after song rows.
+  - Artists: action below the horizontal artist row.
+- Append pages, dedupe by ID, and apply the existing artist ordering rules to the accumulated list.
+- Reset all paging state when the query changes.
+- Use a query generation token or cancelable job so a slow response from an old query cannot append to a new query.
+- Show per-section spinners while loading and hide the action when no more results exist.
+- Keep search history recording limited to submit/result-open actions; load-more must not record history.
 
 **Files:**
-- `ui/screens/PlayerScreen.kt`
+
+- `ui/screens/LibraryScreens.kt` (`:145-410`)
 
 **Acceptance:**
-- Swipe down past the threshold closes the player.
-- A short drag snaps back.
-- Seek bar dragging still seeks and does not close the player.
-- System back and the down-arrow button still close the player.
 
-**Depends on:** none. **Effort:** M.
+- Every matching album, artist, and song can be reached, beyond the old caps.
+- Loading more in one section does not affect the others.
+- A query change cancels/reset old results.
+- No duplicate results appear.
+- The UI clearly indicates when a section has no more results.
 
----
+**Depends on:** WP-02. **Effort:** M.
 
-**WP-09 — Fix double-tap queue-next**
+### Phase 3 — Settings, homepage, theme, and navigation
 
-**Root cause hypothesis:** the first tap of a double tap triggers `onTrackClick`/`replaceQueue`, which changes `currentTrackId` and recomposes the track row. That can reset `combinedClickable`'s double-tap detection before the second tap is recognized.
+**WP-05 — Fix vibration intensity**
+
+**Root cause:** `AppHaptics` maps intensity only to `VibrationEffect` amplitude (`AppHaptics.kt:23-47`) while using the same duration for every level. On devices without amplitude control it falls back to `DEFAULT_AMPLITUDE`, making all three levels identical. The current test action always uses the same long-press pattern (`SettingsScreen.kt:360`, `:483-489`).
 
 **Work:**
-- Replace the current `combinedClickable` gesture handling in `AlbumScreen.kt:370-402` with stable gesture detection, e.g. `Modifier.pointerInput(track.id)` using `detectTapGestures(onTap, onDoubleTap, onLongPress)`.
-- Use `rememberUpdatedState` for callbacks so recomposition does not restart the gesture detector.
-- Keep semantics:
-  - Single tap: play track or toggle the current track.
-  - Double tap: queue next.
-  - Long press: append to queue.
-- Ensure a double tap does not also perform the single-tap action.
-- Keep the existing flash feedback for double tap and long press.
-- Add haptic feedback for queue-next and append actions.
-- Verify with the current track, non-current tracks, and duplicate tracks already in the queue.
+
+- Map each intensity to both amplitude and duration/waveform:
+  - Light: short, low amplitude.
+  - Medium: medium duration and amplitude.
+  - Strong: longer/heavier pattern.
+- On devices with amplitude control, use the amplitude mapping.
+- On devices without amplitude control, use clearly distinct durations or a two-pulse waveform so intensity is still perceptible.
+- Keep `performLongPress()` and `performTick()` distinct, and make the test action use a representative long-press pattern.
+- Verify that saving intensity while the Settings screen is open recreates the `AppHaptics` instance and updates the composition local (`MainActivity.kt:114-120`).
+- Audit all haptic call sites to confirm they use `LocalAppHaptics` rather than platform defaults.
 
 **Files:**
-- `ui/screens/AlbumScreen.kt`
-- Possibly `data/PlaybackManager.kt` if queue insertion needs adjustment.
+
+- `ui/components/AppHaptics.kt` (`:10-48`)
+- `ui/screens/SettingsScreen.kt` (`:431-490`)
+- `MainActivity.kt` (`:114-120`)
 
 **Acceptance:**
-- Double-tapping a non-current track adds it after the current track without starting playback.
-- Double-tapping the current track also queues it next.
-- Single tap still plays the track once.
-- Long press still appends to the end.
-- Repeated double taps produce the expected number of queue entries.
 
-**Depends on:** WP-02 for reliable queue identity. **Effort:** M.
-
-### Phase 4 — Search and metadata
-
-**WP-10 — Global search history**
-
-**Work:**
-- Persist recent queries in `SharedPreferences` (e.g. `search_prefs`), global for the device.
-- Store up to 10 recent queries, newest first, deduplicated case-insensitively.
-- When the query is blank, show a **Recent searches** section:
-  - Tap a history entry to reuse it.
-  - Remove a single entry.
-  - Clear all history.
-- Record a query when:
-  - The user submits via the keyboard search action.
-  - The user opens a search result.
-- Add keyboard search action to the `OutlinedTextField`.
-- Ensure history is not recorded for every debounced keystroke.
-
-**Files:**
-- `ui/screens/LibraryScreens.kt` (`SearchScreen`)
-
-**Acceptance:**
-- Recent searches survive app restart.
-- Submitting the same query twice does not create duplicates.
-- History is capped at 10 entries.
-- Tapping a history entry fills the search field and runs the search.
-- Individual removal and clear-all work.
-- Search history is shared across servers/accounts on the device.
-
-**Depends on:** none. **Effort:** M.
-
----
-
-**WP-11 — Detect one-track albums as singles**
-
-**Work:**
-- Ensure `songCount` is parsed consistently:
-  - `parseAlbumList()` already reads it.
-  - Add it to `parseArtistAlbums()`.
-- Treat an album as a single when `songCount == 1`.
-- Keep existing type/name checks as additional signals.
-- Update `ArtistScreen.isSingleOrEP()` to include `songCount == 1`.
-- Ensure the Albums tab excludes one-track albums and Singles & EPs includes them.
-
-**Files:**
-- `data/NavidromeManager.kt` (`:393-418`, `:673-693`)
-- `ui/screens/ArtistScreen.kt` (`:52-83`)
-
-**Acceptance:**
-- A one-track album appears in Singles & EPs.
-- Multi-track albums still appear in Albums.
-- Name-based single/EP detection continues to work.
-- Missing or zero `songCount` does not incorrectly classify every album as a single.
+- Changing Light/Medium/Strong changes the test vibration on an amplitude-capable device.
+- On a device without amplitude control, the levels still differ in duration/pattern.
+- The vibration enable switch still fully disables haptics.
+- Existing double-tap, long-press, reorder, and swipe haptics continue to work.
 
 **Depends on:** none. **Effort:** S.
 
 ---
 
-**WP-12 — Multi-disc album display**
+**WP-06 — Configurable homepage rows and home-mixes prefix**
 
-**Current state:** `AlbumScreen` already groups tracks by `discNumber` and shows a header when more than one disc exists. This item hardens and verifies that behavior.
+**Root cause:** Homepage row order is hardcoded in `HomeScreen.kt:101-205`. The playlist prefix lives in its own `PLAYLISTS` Settings category (`SettingsScreen.kt:46`, `:284-303`), separate from any homepage configuration.
 
 **Work:**
-- Normalize missing or zero disc numbers to `1`.
-- Ensure tracks are sorted by disc, then track number.
-- When multiple discs exist, show clear headers such as **Disc 1 of 2**.
-- Keep track numbers restarting per disc.
-- Ensure the flat playback list order matches the grouped display order.
-- Verify offline cache read/write preserves `discNumber`.
-- If headers do not appear against a real server, inspect raw JSON field names and add fallbacks.
-- Avoid showing a disc header for single-disc albums.
+
+- Define a stable `HomeRow` model in the data layer:
+  - Available Offline.
+  - Random Albums.
+  - Recently Played.
+  - Most Played Albums.
+  - Most Played Artists.
+  - Your mixes.
+- Persist in DataStore:
+  - Ordered row keys.
+  - Hidden row keys.
+- Add CredentialsManager flows and save methods, with normalization:
+  - Missing keys use the default order.
+  - Unknown keys are dropped.
+  - Duplicate keys are removed.
+- Update `HomeScreen` to:
+  - Collect the configuration.
+  - Render online sections in the configured order.
+  - Skip hidden or empty sections.
+  - Skip network calls for disabled sections where practical.
+  - Keep the offline fallback view independent of the online section configuration.
+- Add a new `HOMEPAGE` Settings category containing:
+  - Row reorder controls (up/down arrows).
+  - A visibility switch per row.
+  - The existing "Playlist name prefix" field.
+- Remove the separate `PLAYLISTS` category and move its content into Homepage.
+- Preserve the existing behavior where an empty prefix shows all playlists.
 
 **Files:**
-- `data/NavidromeManager.kt` (`:528-580`)
-- `ui/screens/AlbumScreen.kt` (`:346-408`)
-- `data/OfflineLibraryManager.kt` (`:290-302`, `:314-341`)
+
+- `data/CredentialsManager.kt` (`:13-33`, `:100-130`)
+- `ui/screens/HomeScreen.kt` (`:58-89`, `:91-206`)
+- `ui/screens/SettingsScreen.kt` (`:39-50`, `:284-303`)
 
 **Acceptance:**
-- A two-disc album shows two labeled disc sections.
-- Tracks are ordered correctly within and across discs.
-- Playback from any track starts with the correct queue order.
-- Offline cached multi-disc albums still show correct headers.
-- Single-disc albums show no disc header.
+
+- Homepage sections appear in the configured order after restart.
+- Hidden sections stay hidden after restart.
+- All six sections can be reordered and disabled; at least the rest of Home remains usable.
+- The playlist prefix field works from the Homepage category and still affects the Your mixes row.
+- Sorting/hiding settings do not break the offline cached-albums fallback.
 
 **Depends on:** none. **Effort:** M.
 
-### Phase 5 — Verification and documentation
+---
 
-**WP-13 — Build, lint, and manual regression pass**
+**WP-07 — Merge playback-quality settings and fix option layout**
+
+**Root cause:**
+
+- `TRANSCODING` and `IMAGE_QUALITY` are separate Settings categories (`SettingsScreen.kt:45-47`).
+- Transcoding and cover-size chips are in `FlowRow`s sized by content (`SettingsScreen.kt:236-332`), so they do not use the available horizontal width consistently.
+- The `Unlimited` bitrate chip sits in the same row as the numeric bitrates (`SettingsScreen.kt:266-281`) and is too wide for the remaining row.
 
 **Work:**
-- Build: `.\gradlew.bat :app:assembleDebug`
-- Lint if available: `.\gradlew.bat :app:lintDebug`
-- Run the manual test matrix from WP-00.
-- Verify no regressions in:
-  - Playback and notification controls.
-  - Offline download and playback.
-  - Search and navigation.
-  - Queue add/remove/reorder/clear.
-  - Favorites and scrobbling.
-- Optionally extract pure queue transformation helpers and add unit tests for:
-  - Move before/after current.
-  - Remove before/after current.
-  - Duplicate track identity.
-  - Album queue insertion.
+
+- Replace `TRANSCODING` and `IMAGE_QUALITY` with one `PLAYBACK_QUALITY` category:
+  - Title/description covering streaming format, bitrate, and cover art resolution.
+  - Keep the same save behavior and defaults.
+- Lay out options in equal-width rows:
+  - Formats: four equally weighted chips filling the row.
+  - Numeric bitrates: four equally weighted chips filling the row.
+  - `Unlimited`: a separate full-width chip on its own line.
+  - Small cover sizes: four equally weighted chips.
+  - Large cover sizes: four equally weighted chips.
+- Use `Row` + `Modifier.weight(1f)` with chips that fill their slot rather than content-sized `FlowRow` items.
+- Preserve the RAW behavior:
+  - Raw selected forces unlimited bitrate.
+  - Numeric bitrates remain disabled while RAW is selected.
+- Keep labels short enough to avoid clipping on narrow screens.
+
+**Files:**
+
+- `ui/screens/SettingsScreen.kt` (`:39-50`, `:236-332`)
 
 **Acceptance:**
-- Build passes.
-- Lint has no new errors.
-- Manual matrix passes.
-- No known blocking gesture conflicts.
 
-**Depends on:** all implementation items. **Effort:** M.
+- Transcoding and image settings appear in one category.
+- Option buttons share the horizontal width evenly and do not leave unused right-side space.
+- `Unlimited` occupies its own full-width line.
+- RAW still disables numeric bitrate choices and selects unlimited.
+- Save/restore of all values still works after restart.
+
+**Depends on:** WP-05 and WP-06 only for the shared Settings file edits; logically independent. **Effort:** S.
 
 ---
 
-**WP-14 — Update README and feature docs**
+**WP-08 — Add a primary color setting under System**
+
+**Root cause:** the accent is fixed to `VVADRed` (`ui/theme/Color.kt:5`, `:10-12`) and hardcoded again in `PlayerScreen.kt:37`, `:249`, `:275-292`. There is no persisted user preference.
 
 **Work:**
-- Update `README.md` queue controls:
-  - Drag to reorder.
-  - Remove button instead of swipe.
-  - Current item protected.
-- Document album queue actions.
-- Document player bar swipe and player screen swipe-down.
-- Document search history.
-- Document singles detection and multi-disc display.
-- Update the controls/features sections to match the implemented behavior.
+
+- Add a DataStore preference for the primary color, stored as an ARGB integer or hex string, defaulting to the current `VVADRed`.
+- Add a `primaryColor` flow and save method to `CredentialsManager`.
+- Update `VVADPlayerTheme` to accept a primary color parameter and build the dark/light schemes from it:
+  - Set `primary`, `primaryContainer`, and `tertiary` consistently.
+  - Compute `onPrimary` / `onPrimaryContainer` from luminance so light accents get dark content.
+- Collect the color in `MainActivity` and pass it to `VVADPlayerTheme`.
+- Replace hardcoded `VVADRed` usages in `PlayerScreen` with `MaterialTheme.colorScheme.primary`:
+  - Favorite icon.
+  - Buffered progress.
+  - Slider thumb and active track.
+- Add a **Primary color** control to the System settings section:
+  - A row/grid of preset color swatches.
+  - A visible selected state.
+  - A reset-to-default action.
+- Keep system bars black as they are today.
 
 **Files:**
-- `README.md`
-- `ARCHITECTURE.md` (update known gaps after implementation)
+
+- `data/CredentialsManager.kt` (`:13-33`, `:100-130`)
+- `ui/theme/Color.kt` (`:5-12`)
+- `ui/theme/Theme.kt` (`:19-92`)
+- `ui/screens/PlayerScreen.kt` (`:37`, `:243-295`)
+- `ui/screens/SettingsScreen.kt` (`:357-362`, `:431-490`)
+- `MainActivity.kt` (`:112-120`)
 
 **Acceptance:**
-- README does not describe old swipe-to-remove behavior.
-- New gestures and queue actions are documented.
-- Architecture doc no longer lists completed items as gaps.
 
-**Depends on:** WP-01 through WP-13. **Effort:** S.
+- Changing the color updates the app accent immediately.
+- The chosen color survives restart.
+- Primary-colored text/icons, sliders, and selection controls use the chosen color.
+- Light accent colors remain readable because `onPrimary` switches appropriately.
+- Reset restores the default VVAD red.
+- No hardcoded accent color remains in the player UI.
+
+**Depends on:** none. **Effort:** M.
+
+---
+
+**WP-09 — Add bottom-navigation customization**
+
+**Root cause:** the five navigation items are hardcoded in `MainActivity.kt:270-338`, with route-selection mapping at `:161-168`. There is no persisted order or visibility configuration.
+
+**Work:**
+
+- Define a stable navigation item model:
+  - Route, label, icon.
+  - Home, Search, Albums, Playlists, Artists.
+- Persist in DataStore:
+  - Ordered route keys.
+  - Hidden route keys.
+- Add CredentialsManager flows and save methods with normalization:
+  - Unknown routes are dropped.
+  - Missing routes are appended using the default order.
+  - Home is always inserted and cannot be hidden, even if a malformed preference says otherwise.
+- Update `MainActivity` to render `NavigationBarItem`s from the configured list instead of the hardcoded order.
+- Keep `selectedNavRoute` logic working for hidden routes:
+  - If the current route is hidden, no item is selected; Home remains the guaranteed fallback.
+- Add a `NAVIGATION` Settings category:
+  - Visibility switch per item; Home switch disabled.
+  - Up/down reorder controls.
+  - Reset-to-default action.
+- Persist changes immediately and refresh the bar without restarting the activity.
+- Ensure navigating to a hidden top-level route from other UI still works, but the hidden item simply does not appear in the bar.
+
+**Files:**
+
+- `MainActivity.kt` (`:149-196`, `:252-342`)
+- `data/CredentialsManager.kt` (`:13-33`, `:100-130`)
+- `ui/screens/SettingsScreen.kt` (`:39-50`, `:368-409`)
+
+**Acceptance:**
+
+- Navbar items can be reordered and hidden, and the result survives restart.
+- Home cannot be hidden.
+- At least Home remains available if preferences are corrupted.
+- The selected item highlight still follows the current route.
+- Navigation behavior and back-stack handling are unchanged for visible items.
+
+**Depends on:** none. **Effort:** M.
+
+### Phase 4 — Verification and documentation
+
+**WP-10 — Build, regression pass, and docs**
+
+**Work:**
+
+- Build: `.\gradlew.bat :app:assembleDebug`.
+- Run the manual matrix from WP-00.
+- Verify no regressions in:
+  - Album/artist/search navigation.
+  - Playback, queue next/append, favorites, and scrobbling.
+  - Offline downloads and offline playback.
+  - Search history.
+  - Existing haptics and gestures.
+  - Settings persistence across restart.
+- If lint is available and stable, run `.\gradlew.bat :app:lintDebug`; record the existing known lint-tooling issue if it still occurs.
+- Update `README.md`:
+  - Player album/playlist link behavior.
+  - Pagination/load-more behavior.
+  - Homepage customization.
+  - Combined playback-quality settings.
+  - Primary color and navbar customization.
+- Update `ARCHITECTURE.md`:
+  - New settings keys and categories.
+  - Paged API usage.
+  - Queue source context and per-track album metadata.
+  - Theme accent flow.
+  - Remove or revise stale known gaps.
+
+**Files:**
+
+- `README.md`
+- `ARCHITECTURE.md`
+- No source changes beyond fixes found during verification.
+
+**Acceptance:**
+
+- Debug build succeeds.
+- Manual matrix passes.
+- Player links work from both album and playlist playback.
+- Pagination reaches the full result set.
+- All new settings persist and apply immediately.
+- Documentation matches shipped behavior.
+
+**Depends on:** WP-01 through WP-09. **Effort:** M.
 
 ## 5. Recommended sequencing
 
-1. **WP-00** baseline.
-2. **WP-01** favorites — independent, quick user-visible win.
-3. **WP-02** queue model — prerequisite for queue UI and double-tap reliability.
-4. **WP-03** album title centering — independent, quick.
-5. **WP-04** queue remove button.
-6. **WP-05** queue reorder.
-7. **WP-06** album queueing.
-8. **WP-07** player bar swipe.
-9. **WP-08** player screen swipe-down.
-10. **WP-09** double-tap queue fix.
-11. **WP-10** search history.
-12. **WP-11** singles detection.
-13. **WP-12** multi-disc display.
-14. **WP-13** verification.
-15. **WP-14** documentation.
+1. **WP-00** baseline and test data.
+2. **WP-01** player link fix.
+3. **WP-02** paging API.
+4. **WP-03** Albums/Artists infinite scroll.
+5. **WP-04** Search pagination.
+6. **WP-05** vibration intensity.
+7. **WP-06** homepage rows and playlist prefix move.
+8. **WP-07** settings merge and option layout.
+9. **WP-08** primary color.
+10. **WP-09** navbar customization.
+11. **WP-10** verification and docs.
 
-Gestures and search/metadata work are independent and can be done in parallel after WP-02 if desired.
+WP-05, WP-08, and WP-09 touch the same Settings file and can be performed in any order after WP-06/WP-07 if conflicts are managed. WP-01 and WP-02 are independent of the settings work.
 
 ## 6. Effort summary
 
 | ID | Item | Effort | Depends on |
 |---|---|---|---|
-| WP-00 | Baseline/test matrix | S | — |
-| WP-01 | Observable favorites | S | — |
-| WP-02 | Queue model and operations | M | — |
-| WP-03 | Center multiline album title | S | — |
-| WP-04 | Queue remove button | S | WP-02 |
-| WP-05 | Queue drag reorder | L | WP-02 |
-| WP-06 | Album queueing | M | WP-02 |
-| WP-07 | Player bar swipe | M | — |
-| WP-08 | Player screen swipe-down | M | — |
-| WP-09 | Double-tap queue fix | M | WP-02 |
-| WP-10 | Search history | M | — |
-| WP-11 | Singles detection | S | — |
-| WP-12 | Multi-disc display | M | — |
-| WP-13 | Verification | M | All |
-| WP-14 | Documentation | S | WP-01–WP-13 |
+| WP-00 | Baseline and test matrix | S | — |
+| WP-01 | Player album/playlist link fix | M | — |
+| WP-02 | Paged album/artist/search APIs | M | — |
+| WP-03 | Albums/Artists infinite scroll | M | WP-02 |
+| WP-04 | Search pagination | M | WP-02 |
+| WP-05 | Vibration intensity fix | S | — |
+| WP-06 | Homepage rows and mixes prefix | M | — |
+| WP-07 | Playback-quality settings and layout | S | WP-05, WP-06 |
+| WP-08 | Primary color setting | M | — |
+| WP-09 | Navbar customization | M | — |
+| WP-10 | Verification and docs | M | WP-01–WP-09 |
 
-Effort scale: **S** = small, **M** = medium, **L** = large/riskiest.
+Effort scale: **S** = small, **M** = medium.
 
 ## 7. Risks and mitigations
 
 | Risk | Mitigation |
 |---|---|
-| Manual reorder becomes janky or buggy | Start with manual drag handle. If auto-scroll/animation quality is insufficient, switch to a compatible reorderable library before shipping. |
-| Queue list and ExoPlayer diverge | Centralize all mutations in `PlaybackManager`; use stable `queueId`; verify with duplicate tracks and moves around the current index. |
-| Gesture conflicts | Scope gestures carefully: drag handle for reorder, horizontal drag on player bar, vertical drag on player background, slider keeps horizontal drag. Test on a real device. |
-| Double-tap still triggers single-tap playback | Use stable `pointerInput` keys and `rememberUpdatedState`; verify with recomposition caused by current-track changes. |
-| Multi-disc field names vary by server | Verify raw JSON first; add `discNumber`/`disc_number` fallbacks and normalize zero/missing values. |
-| One-track albums missing `songCount` | Do not classify on a missing/zero value; keep name/type fallback checks. |
-| Search history grows or duplicates | Cap at 10, dedupe case-insensitively, record only on submit/result open. |
-| New dependency risk | Avoid it for reorder unless manual implementation fails the acceptance criteria. |
+| Navidrome ignores `_start` or returns no total count | Build URLs with both `_start` and `_end`; deduplicate by ID; stop when a page is empty or adds no new items. |
+| Infinite scroll duplicates or races | Keep a monotonically increasing load generation; ignore stale responses; deduplicate before appending. |
+| Playlist API omits per-track album IDs | Leave the track album link disabled rather than navigating to the playlist ID; prefer Subsonic `entry[].albumId`, with `album_id` fallback. |
+| Queue source and track album get confused | Store them as separate fields on `QueueEntry`; never write the playlist ID into the track album field. |
+| Vibration still feels identical on some hardware | Vary duration/waveform as well as amplitude; treat amplitude control as optional. |
+| Light primary color reduces contrast | Derive `onPrimary` from luminance and test the preset palette in both themes. |
+| Hidden navbar route leaves no selection | Keep Home always visible and treat it as the guaranteed fallback; normalize malformed preferences. |
+| Homepage settings corrupt or miss keys after an update | Normalize order/hidden lists against the known `HomeRow` set every time they are read. |
+| Settings file conflicts across WP-05, WP-07, WP-08, WP-09 | Apply settings edits in small commits and keep section content in separate composables where possible. |
+| Search pagination ordering changes across pages | Apply the existing artist ordering to the accumulated list after each append; rely on server order for albums/songs. |
 
 ## 8. Definition of done
 
-- All WP items are implemented or explicitly deferred.
+- Player song-title taps open the correct album during playlist playback.
+- Player top-title taps open the playlist during playlist playback and the album during album playback.
+- Albums and Artists screens load all server items through infinite scroll, in list and grid modes.
+- Search result sections can load further pages until exhausted.
+- Vibration intensity produces perceptibly different feedback and respects the enable switch.
+- Homepage rows can be reordered and hidden, persist across restart, and the playlist prefix setting lives in the Homepage category.
+- Transcoding and cover-size settings share one category; option buttons fill the row width; Unlimited is on its own line.
+- The System section can change the primary color, and the accent applies throughout the app.
+- The bottom bar order and visibility are configurable; Home cannot be hidden.
 - `.\gradlew.bat :app:assembleDebug` succeeds.
-- Lint has no new errors.
-- Manual regression matrix passes.
-- Favorites update immediately in lists.
-- Long album titles are centered.
-- Queue supports remove buttons and drag reorder.
-- Current queue item cannot be removed.
-- Albums can be queued with Play next and Add to queue.
-- Player bar supports swipe-to-skip.
-- Player screen supports swipe-down-to-close.
-- Search history persists globally on the device.
-- One-track albums appear as singles.
-- Multi-disc albums render with correct disc sections.
-- Double-tap queues the selected track reliably.
-- README and architecture docs match the shipped behavior.
+- The manual regression matrix passes.
+- `README.md` and `ARCHITECTURE.md` describe the shipped behavior.

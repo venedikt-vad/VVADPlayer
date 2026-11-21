@@ -33,7 +33,9 @@ data class Track(
     val artists: List<TrackArtist>, // List for multiple artists
     val number: Int,
     val discNumber: Int = 1,
-    val duration: Int
+    val duration: Int,
+    val albumId: String = "",
+    val albumName: String = ""
 )
 
 data class TrackArtist(

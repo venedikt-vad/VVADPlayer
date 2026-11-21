@@ -20,28 +20,59 @@ class AppHaptics(
         context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
     }
 
-    private val amplitude = when (intensity.coerceIn(1, 3)) {
-        1 -> 70
-        2 -> 150
+    private val level = intensity.coerceIn(1, 3)
+    private val amplitude = when (level) {
+        1 -> 150
+        2 -> 205
         else -> 255
+    }
+    private val longPressDurationMs = when (level) {
+        1 -> 35L
+        2 -> 55L
+        else -> 70L
+    }
+    private val tickDurationMs = when (level) {
+        1 -> 12L
+        2 -> 18L
+        else -> 25L
     }
 
     fun performLongPress() {
-        vibrate(32L)
+        vibrate(longPressDurationMs, amplitude, strongDoublePulse = level == 3)
     }
 
     fun performTick() {
-        vibrate(14L)
+        vibrate(tickDurationMs, amplitude)
     }
 
-    private fun vibrate(durationMs: Long) {
+    private fun vibrate(
+        durationMs: Long,
+        amplitude: Int,
+        strongDoublePulse: Boolean = false
+    ) {
         if (!enabled) return
         val vibrator = vibrator ?: return
         if (!vibrator.hasVibrator()) return
+
         val effect = if (vibrator.hasAmplitudeControl()) {
-            VibrationEffect.createOneShot(durationMs, amplitude)
+            if (strongDoublePulse) {
+                VibrationEffect.createWaveform(
+                    longArrayOf(0L, durationMs, 24L, durationMs),
+                    intArrayOf(0, amplitude, 0, amplitude),
+                    -1
+                )
+            } else {
+                VibrationEffect.createOneShot(durationMs, amplitude)
+            }
         } else {
-            VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE)
+            if (strongDoublePulse) {
+                VibrationEffect.createWaveform(
+                    longArrayOf(0L, durationMs, 24L, durationMs),
+                    -1
+                )
+            } else {
+                VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE)
+            }
         }
         vibrator.vibrate(effect)
     }

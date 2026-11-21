@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
@@ -46,11 +47,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -96,6 +101,11 @@ private enum class PlaylistSortOption(val label: String) {
     SONG_COUNT("Song count"),
     DURATION("Duration")
 }
+
+private const val LIBRARY_PAGE_SIZE = 100
+private const val SEARCH_ALBUM_PAGE_SIZE = 30
+private const val SEARCH_ARTIST_PAGE_SIZE = 30
+private const val SEARCH_SONG_PAGE_SIZE = 30
 
 private const val SEARCH_HISTORY_PREFS = "search_prefs"
 private const val SEARCH_HISTORY_KEY = "recent_searches"
@@ -157,8 +167,19 @@ fun SearchScreen(
     var artists by remember { mutableStateOf<List<Album>>(emptyList()) }
     var songs by remember { mutableStateOf<List<SongSearchResult>>(emptyList()) }
     var isLoading by remember { mutableStateOf(false) }
+    var albumStart by remember { mutableIntStateOf(0) }
+    var artistStart by remember { mutableIntStateOf(0) }
+    var songStart by remember { mutableIntStateOf(0) }
+    var albumHasMore by remember { mutableStateOf(false) }
+    var artistHasMore by remember { mutableStateOf(false) }
+    var songHasMore by remember { mutableStateOf(false) }
+    var isLoadingMoreAlbums by remember { mutableStateOf(false) }
+    var isLoadingMoreArtists by remember { mutableStateOf(false) }
+    var isLoadingMoreSongs by remember { mutableStateOf(false) }
+    var searchGeneration by remember { mutableIntStateOf(0) }
     val context = LocalContext.current
     val keyboardController = LocalSoftwareKeyboardController.current
+    val scope = rememberCoroutineScope()
     var recentSearches by remember { mutableStateOf(readSearchHistory(context)) }
     val recordSearch: () -> Unit = {
         val trimmed = query.trim()
@@ -169,19 +190,95 @@ fun SearchScreen(
 
     LaunchedEffect(query) {
         val trimmed = query.trim()
+        searchGeneration++
+        val generation = searchGeneration
+        isLoadingMoreAlbums = false
+        isLoadingMoreArtists = false
+        isLoadingMoreSongs = false
         if (trimmed.isBlank()) {
             albums = emptyList()
             artists = emptyList()
             songs = emptyList()
+            albumStart = 0
+            artistStart = 0
+            songStart = 0
+            albumHasMore = false
+            artistHasMore = false
+            songHasMore = false
             isLoading = false
             return@LaunchedEffect
         }
         isLoading = true
         delay(300)
-        albums = navidromeManager.searchAlbums(trimmed)
-        artists = navidromeManager.searchArtists(trimmed)
-        songs = navidromeManager.searchSongs(trimmed)
-        isLoading = false
+        val albumPage = navidromeManager.searchAlbumsPage(trimmed, 0, SEARCH_ALBUM_PAGE_SIZE)
+        val artistPage = navidromeManager.searchArtistsPage(trimmed, 0, SEARCH_ARTIST_PAGE_SIZE)
+        val songPage = navidromeManager.searchSongsPage(trimmed, 0, SEARCH_SONG_PAGE_SIZE)
+        if (generation == searchGeneration) {
+            albums = albumPage.items
+            artists = artistPage.items
+            songs = songPage.items
+            albumStart = albumPage.items.size
+            artistStart = artistPage.items.size
+            songStart = songPage.items.size
+            albumHasMore = albumPage.hasMore
+            artistHasMore = artistPage.hasMore
+            songHasMore = songPage.hasMore
+            isLoading = false
+        }
+    }
+
+    fun loadMoreAlbums() {
+        val trimmed = query.trim()
+        if (trimmed.isBlank() || isLoadingMoreAlbums || !albumHasMore) return
+        isLoadingMoreAlbums = true
+        val generation = searchGeneration
+        scope.launch {
+            val page = navidromeManager.searchAlbumsPage(trimmed, albumStart, SEARCH_ALBUM_PAGE_SIZE)
+            if (generation == searchGeneration) {
+                val existingIds = albums.map { it.id }.toHashSet()
+                val newItems = page.items.filter { it.id !in existingIds }
+                albums = albums + newItems
+                albumStart += page.items.size
+                albumHasMore = page.hasMore && newItems.isNotEmpty()
+                isLoadingMoreAlbums = false
+            }
+        }
+    }
+
+    fun loadMoreArtists() {
+        val trimmed = query.trim()
+        if (trimmed.isBlank() || isLoadingMoreArtists || !artistHasMore) return
+        isLoadingMoreArtists = true
+        val generation = searchGeneration
+        scope.launch {
+            val page = navidromeManager.searchArtistsPage(trimmed, artistStart, SEARCH_ARTIST_PAGE_SIZE)
+            if (generation == searchGeneration) {
+                val existingIds = artists.map { it.id }.toHashSet()
+                val newItems = page.items.filter { it.id !in existingIds }
+                artists = artists + newItems
+                artistStart += page.items.size
+                artistHasMore = page.hasMore && newItems.isNotEmpty()
+                isLoadingMoreArtists = false
+            }
+        }
+    }
+
+    fun loadMoreSongs() {
+        val trimmed = query.trim()
+        if (trimmed.isBlank() || isLoadingMoreSongs || !songHasMore) return
+        isLoadingMoreSongs = true
+        val generation = searchGeneration
+        scope.launch {
+            val page = navidromeManager.searchSongsPage(trimmed, songStart, SEARCH_SONG_PAGE_SIZE)
+            if (generation == searchGeneration) {
+                val existingIds = songs.map { it.id }.toHashSet()
+                val newItems = page.items.filter { it.id !in existingIds }
+                songs = songs + newItems
+                songStart += page.items.size
+                songHasMore = page.hasMore && newItems.isNotEmpty()
+                isLoadingMoreSongs = false
+            }
+        }
     }
 
     val trimmedQuery = query.trim()
@@ -358,6 +455,14 @@ fun SearchScreen(
                                 }
                             }
                         }
+                        if (artistHasMore || isLoadingMoreArtists) {
+                            item {
+                                SearchLoadMore(
+                                    isLoading = isLoadingMoreArtists,
+                                    onClick = { loadMoreArtists() }
+                                )
+                            }
+                        }
                     }
 
                     if (filteredAlbums.isNotEmpty()) {
@@ -378,6 +483,14 @@ fun SearchScreen(
                                 onPlayNext = { onAlbumPlayNext(album) },
                                 onAddToQueue = { onAlbumAddToQueue(album) }
                             )
+                        }
+                        if (albumHasMore || isLoadingMoreAlbums) {
+                            item {
+                                SearchLoadMore(
+                                    isLoading = isLoadingMoreAlbums,
+                                    onClick = { loadMoreAlbums() }
+                                )
+                            }
                         }
                     }
 
@@ -402,6 +515,14 @@ fun SearchScreen(
                                 }
                             )
                         }
+                        if (songHasMore || isLoadingMoreSongs) {
+                            item {
+                                SearchLoadMore(
+                                    isLoading = isLoadingMoreSongs,
+                                    onClick = { loadMoreSongs() }
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -424,6 +545,10 @@ fun AlbumsScreen(
 
     var albums by remember { mutableStateOf<List<Album>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var isLoadingMore by remember { mutableStateOf(false) }
+    var hasMore by remember { mutableStateOf(true) }
+    var nextStart by remember { mutableIntStateOf(0) }
+    var loadGeneration by remember { mutableIntStateOf(0) }
     var sortOption by remember {
         mutableStateOf(
             try { AlbumSortOption.valueOf(prefs.getString("album_sort", "NAME") ?: "NAME") }
@@ -436,14 +561,57 @@ fun AlbumsScreen(
     val gridState = rememberLazyGridState()
 
     LaunchedEffect(sortOption, ascending) {
+        loadGeneration++
+        val generation = loadGeneration
         isLoading = true
-        albums = navidromeManager.getAlbums(
+        isLoadingMore = false
+        hasMore = true
+        nextStart = 0
+        val page = navidromeManager.getAlbumsPage(
+            start = 0,
+            limit = LIBRARY_PAGE_SIZE,
             sort = sortOption.toServerSort(),
             order = if (ascending) "ASC" else "DESC"
         )
-        isLoading = false
-        if (isGrid) gridState.animateScrollToItem(0)
-        else listState.animateScrollToItem(0)
+        if (generation == loadGeneration) {
+            albums = page.items
+            nextStart = page.items.size
+            hasMore = page.hasMore
+            isLoading = false
+            if (isGrid) gridState.animateScrollToItem(0)
+            else listState.animateScrollToItem(0)
+        }
+    }
+
+    val nearEnd by remember {
+        derivedStateOf {
+            val lastVisible = if (isGrid) {
+                gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            } else {
+                listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            }
+            lastVisible >= albums.size - 5
+        }
+    }
+
+    LaunchedEffect(nearEnd, hasMore, isLoading, loadGeneration, albums.size) {
+        if (!nearEnd || !hasMore || isLoading || isLoadingMore || albums.isEmpty()) return@LaunchedEffect
+        isLoadingMore = true
+        val generation = loadGeneration
+        val page = navidromeManager.getAlbumsPage(
+            start = nextStart,
+            limit = LIBRARY_PAGE_SIZE,
+            sort = sortOption.toServerSort(),
+            order = if (ascending) "ASC" else "DESC"
+        )
+        if (generation == loadGeneration) {
+            val existingIds = albums.map { it.id }.toHashSet()
+            val newItems = page.items.filter { it.id !in existingIds }
+            albums = albums + newItems
+            nextStart += page.items.size
+            hasMore = page.hasMore && newItems.isNotEmpty()
+        }
+        isLoadingMore = false
     }
 
     LaunchedEffect(sortOption, ascending, isGrid) {
@@ -518,6 +686,9 @@ fun AlbumsScreen(
                                 onAddToQueue = { onAlbumAddToQueue(album) }
                             )
                         }
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            PaginationFooter(isLoadingMore = isLoadingMore, hasMore = hasMore)
+                        }
                     }
                 } else {
                     LazyColumn(
@@ -534,6 +705,9 @@ fun AlbumsScreen(
                                 onPlayNext = { onAlbumPlayNext(album) },
                                 onAddToQueue = { onAlbumAddToQueue(album) }
                             )
+                        }
+                        item {
+                            PaginationFooter(isLoadingMore = isLoadingMore, hasMore = hasMore)
                         }
                     }
                 }
@@ -554,6 +728,10 @@ fun ArtistsScreen(
 
     var artists by remember { mutableStateOf<List<Album>>(emptyList()) }
     var isLoading by remember { mutableStateOf(true) }
+    var isLoadingMore by remember { mutableStateOf(false) }
+    var hasMore by remember { mutableStateOf(true) }
+    var nextStart by remember { mutableIntStateOf(0) }
+    var loadGeneration by remember { mutableIntStateOf(0) }
     var sortOption by remember {
         mutableStateOf(
             try { ArtistSortOption.valueOf(prefs.getString("artist_sort", "NAME") ?: "NAME") }
@@ -566,14 +744,57 @@ fun ArtistsScreen(
     val gridState = rememberLazyGridState()
 
     LaunchedEffect(sortOption, ascending) {
+        loadGeneration++
+        val generation = loadGeneration
         isLoading = true
-        artists = navidromeManager.getArtists(
+        isLoadingMore = false
+        hasMore = true
+        nextStart = 0
+        val page = navidromeManager.getArtistsPage(
+            start = 0,
+            limit = LIBRARY_PAGE_SIZE,
             sort = sortOption.toServerSort(),
             order = if (ascending) "ASC" else "DESC"
         )
-        isLoading = false
-        if (isGrid) gridState.animateScrollToItem(0)
-        else listState.animateScrollToItem(0)
+        if (generation == loadGeneration) {
+            artists = page.items
+            nextStart = page.items.size
+            hasMore = page.hasMore
+            isLoading = false
+            if (isGrid) gridState.animateScrollToItem(0)
+            else listState.animateScrollToItem(0)
+        }
+    }
+
+    val nearEnd by remember {
+        derivedStateOf {
+            val lastVisible = if (isGrid) {
+                gridState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            } else {
+                listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            }
+            lastVisible >= artists.size - 5
+        }
+    }
+
+    LaunchedEffect(nearEnd, hasMore, isLoading, loadGeneration, artists.size) {
+        if (!nearEnd || !hasMore || isLoading || isLoadingMore || artists.isEmpty()) return@LaunchedEffect
+        isLoadingMore = true
+        val generation = loadGeneration
+        val page = navidromeManager.getArtistsPage(
+            start = nextStart,
+            limit = LIBRARY_PAGE_SIZE,
+            sort = sortOption.toServerSort(),
+            order = if (ascending) "ASC" else "DESC"
+        )
+        if (generation == loadGeneration) {
+            val existingIds = artists.map { it.id }.toHashSet()
+            val newItems = page.items.filter { it.id !in existingIds }
+            artists = artists + newItems
+            nextStart += page.items.size
+            hasMore = page.hasMore && newItems.isNotEmpty()
+        }
+        isLoadingMore = false
     }
 
     LaunchedEffect(sortOption, ascending, isGrid) {
@@ -645,6 +866,9 @@ fun ArtistsScreen(
                                 onClick = { onArtistClick(artist.artistId) }
                             )
                         }
+                        item(span = { GridItemSpan(maxLineSpan) }) {
+                            PaginationFooter(isLoadingMore = isLoadingMore, hasMore = hasMore)
+                        }
                     }
                 } else {
                     LazyColumn(
@@ -658,6 +882,9 @@ fun ArtistsScreen(
                                 artist = artist,
                                 onClick = { onArtistClick(artist.artistId) }
                             )
+                        }
+                        item {
+                            PaginationFooter(isLoadingMore = isLoadingMore, hasMore = hasMore)
                         }
                     }
                 }
@@ -1002,6 +1229,50 @@ private fun SectionTitle(text: String) {
         style = MaterialTheme.typography.titleLarge,
         fontWeight = FontWeight.SemiBold
     )
+}
+
+@Composable
+private fun SearchLoadMore(isLoading: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.dp
+            )
+        } else {
+            TextButton(onClick = onClick) {
+                Text("Load more")
+            }
+        }
+    }
+}
+
+@Composable
+private fun PaginationFooter(isLoadingMore: Boolean, hasMore: Boolean) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 12.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        when {
+            isLoadingMore -> CircularProgressIndicator(
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.dp
+            )
+
+            !hasMore -> Text(
+                text = "All items loaded",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
 }
 
 @Composable
